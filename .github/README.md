@@ -9,6 +9,58 @@ See the [original README](https://github.com/buppu3/tnCart/blob/main/README.md) 
 
 There are really not many differences between tnCart and tnCartWonder. tnCartWonder inherits basically all from tnCart except some minor adaptions needed for compatibility with the WonderTANG! boards.
 
+For WonderTANG! V1.02d, these are the differences:
+- Adjust a constant to account for the difference between the MSEL0 and MSEL1 lines of the tnCart rev1 board vs the WonderTANG! V1.02d board
+
+# Build and Flashing instructions
+
+## WonderTANG 1.02d
+
+### How to build the bitstream on Linux
+
+- Copy the `rtl/impl/wondertang_board_rev102d_process_config.json` to `rtl/impl/project_process_config.json`.
+
+  ~~~Shell
+  cp rtl/impl/wondertang_board_rev102d_process_config.json rtl/impl/project_process_config.json
+  ~~~
+
+- Launch GoWin IDE (GOWIN FPGA Designer Version 1.9.9 Beta-4 Education build68283)
+
+  ~~~Shell
+  gw_ide
+  ~~~
+
+- Load the `rtl/wondertang_board_rev102d.gprj` (File | Open ...)
+
+- Edit the `rtl/src/config.v` file and make sure the BOARD parameter points to the WonderTANG! V1.02d board:
+
+  `localparam BOARD                    = BOARD_WONDERTANG_REV102D;`
+
+  Enable and/or disable the tnCart features that you want to build.
+
+- Go to the Process window, right click on "Synthesize" and select "Clean&Rerun All"
+
+### How to flash the bitstream and required additional ROMs on Linux
+
+You will need to use openFPGALoader >= v0.10.0.
+
+- First, flash the bitstream `wondertang_board_rev102d.fs` into the Tang Nano 20k used in your WonderTANG board
+
+  ~~~Shell
+  openFPGALoader -f -b tangnano20k --external-flash rtl/impl/pnr/wondertang_board_rev102d.fs
+  ~~~
+
+- Second, flash the [Nextor ROM](https://github.com/Konamiman/Nextor/releases/download/v2.1.2/Nextor-2.1.2.MegaFlashSDSCC.1-slot.ROM)
+
+  ~~~Shell
+  openFPGALoader -f -b tangnano20k --external-flash -o 1048576 Nextor-2.1.2.MegaFlashSDSCC.1-slot.ROM
+  ~~~
+
+- Finally, flash the [FM ROM](https://github.com/buppu3/tnCart/blob/main/roms/fmbios/bin/fmbios.rom)
+
+  ~~~Shell
+  openFPGALoader -f -b tangnano20k --external-flash -o 1179648 fmbios.rom
+  ~~~
 
 # Useful Information
 

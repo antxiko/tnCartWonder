@@ -58,22 +58,27 @@ module BOARD_REV1_BUS(
     /***************************************************************
      * バッファの切り替え
      ***************************************************************/
-    localparam  CS_A8       = 0,    BIT_A8      = 0;
-    localparam  CS_A9       = 0,    BIT_A9      = 1;
-    localparam  CS_A10      = 0,    BIT_A10     = 2;
-    localparam  CS_A11      = 0,    BIT_A11     = 3;
-    localparam  CS_A12      = 0,    BIT_A12     = 4;
-    localparam  CS_A13      = 0,    BIT_A13     = 5;
-    localparam  CS_A14      = 0,    BIT_A14     = 6;
-    localparam  CS_A15      = 0,    BIT_A15     = 7;
-    localparam  CS_A0       = 1,    BIT_A0      = 0;
-    localparam  CS_A1       = 1,    BIT_A1      = 1;
-    localparam  CS_A2       = 1,    BIT_A2      = 2;
-    localparam  CS_A3       = 1,    BIT_A3      = 3;
-    localparam  CS_A4       = 1,    BIT_A4      = 4;
-    localparam  CS_A5       = 1,    BIT_A5      = 5;
-    localparam  CS_A6       = 1,    BIT_A6      = 6;
-    localparam  CS_A7       = 1,    BIT_A7      = 7;
+    localparam MSEL_A0_A7  = (CONFIG::BOARD == CONFIG::BOARD_WONDERTANG_REV102D)? 0 :
+                             1;
+    localparam MSEL_A8_A15 = (CONFIG::BOARD == CONFIG::BOARD_WONDERTANG_REV102D)? 1 :
+                             0;
+
+    localparam  CS_A8       = MSEL_A8_A15,    BIT_A8      = 0;
+    localparam  CS_A9       = MSEL_A8_A15,    BIT_A9      = 1;
+    localparam  CS_A10      = MSEL_A8_A15,    BIT_A10     = 2;
+    localparam  CS_A11      = MSEL_A8_A15,    BIT_A11     = 3;
+    localparam  CS_A12      = MSEL_A8_A15,    BIT_A12     = 4;
+    localparam  CS_A13      = MSEL_A8_A15,    BIT_A13     = 5;
+    localparam  CS_A14      = MSEL_A8_A15,    BIT_A14     = 6;
+    localparam  CS_A15      = MSEL_A8_A15,    BIT_A15     = 7;
+    localparam  CS_A0       = MSEL_A0_A7,     BIT_A0      = 0;
+    localparam  CS_A1       = MSEL_A0_A7,     BIT_A1      = 1;
+    localparam  CS_A2       = MSEL_A0_A7,     BIT_A2      = 2;
+    localparam  CS_A3       = MSEL_A0_A7,     BIT_A3      = 3;
+    localparam  CS_A4       = MSEL_A0_A7,     BIT_A4      = 4;
+    localparam  CS_A5       = MSEL_A0_A7,     BIT_A5      = 5;
+    localparam  CS_A6       = MSEL_A0_A7,     BIT_A6      = 6;
+    localparam  CS_A7       = MSEL_A0_A7,     BIT_A7      = 7;
     localparam  CS_MERQ     = 2,    BIT_MERQ    = 0;
     localparam  CS_IORQ     = 2,    BIT_IORQ    = 1;
     localparam  CS_CS1      = 2,    BIT_CS1     = 2;
