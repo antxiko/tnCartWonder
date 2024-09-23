@@ -58,9 +58,11 @@ module BOARD_REV1_BUS(
     /***************************************************************
      * バッファの切り替え
      ***************************************************************/
-    localparam MSEL_A0_A7  = (CONFIG::BOARD == CONFIG::BOARD_WONDERTANG_REV102D)? 0 :
+    localparam MSEL_A0_A7  = (CONFIG::BOARD == CONFIG::BOARD_WONDERTANG_REV101C)? 0 :
+                             (CONFIG::BOARD == CONFIG::BOARD_WONDERTANG_REV102D)? 0 :
                              1;
-    localparam MSEL_A8_A15 = (CONFIG::BOARD == CONFIG::BOARD_WONDERTANG_REV102D)? 1 :
+    localparam MSEL_A8_A15 = (CONFIG::BOARD == CONFIG::BOARD_WONDERTANG_REV101C)? 1 :
+                             (CONFIG::BOARD == CONFIG::BOARD_WONDERTANG_REV102D)? 1 :
                              0;
 
     localparam  CS_A8       = MSEL_A8_A15,    BIT_A8      = 0;
@@ -175,7 +177,12 @@ module BOARD_REV1_BUS(
     /***************************************************************
      * その他の信号の出力
      ***************************************************************/
-    assign  CART_INT_n = !Bus.INT_n;
+    if (CONFIG::BOARD == CONFIG::BOARD_WONDERTANG_REV101C) begin
+        assign  CART_INT_n = Bus.INT_n;
+    end
+    else begin
+        assign  CART_INT_n = !Bus.INT_n;
+    end
     assign  CART_WAIT_n = !Bus.WAIT_n;
 
     /***************************************************************

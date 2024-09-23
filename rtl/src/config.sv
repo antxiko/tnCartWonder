@@ -49,9 +49,11 @@ package CONFIG;
      * Board selection
      ***************************************************************/
     localparam BOARD_TNCART_REV1        =  0;
+    localparam BOARD_WONDERTANG_REV101C = 50;
     localparam BOARD_WONDERTANG_REV102D = 51;
 
-    localparam BOARD                    = BOARD_WONDERTANG_REV102D;
+    //localparam BOARD                    = BOARD_WONDERTANG_REV102D;
+    localparam BOARD                    = BOARD_WONDERTANG_REV101C;
 
     /***************************************************************
      * フラッシュメモリマップ
