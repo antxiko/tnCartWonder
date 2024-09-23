@@ -98,7 +98,7 @@ module I2S_AUDIO_TX #(
             // 1-clock delayed
             reqd <= req;
             // read new sample or shift left stored sample
-            sample <= reqd ? SAMPLE_IN : {sample[SAMPLE_WIDTH-1:0], 1'b0};
+            sample <= reqd ? SAMPLE_IN : {sample[SAMPLE_WIDTH-2:0], 1'b0};
         end
     end
 
