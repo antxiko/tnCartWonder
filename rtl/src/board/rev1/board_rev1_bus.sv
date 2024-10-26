@@ -264,12 +264,12 @@ module BOARD_REV1_BUS(
     assign Bus.CLK_21M = CLK_21M;   // 21.6MHz
 
     // 3.58MHz エッジ
-    wire curr_clk_d21m;
+    logic curr_clk_d21m;
     if(CONFIG::ENABLE_SCC == CONFIG::ENABLE_IKASCC) begin
-        assign curr_clk_d21m = delay_clk2;
+        always_ff @(posedge CLK_21M) curr_clk_d21m <= delay_clk2;
     end
     else begin
-        assign curr_clk_d21m = delay_clk[0];
+        always_ff @(posedge CLK_21M) curr_clk_d21m <= delay_clk[0];
     end
     logic prev_clk_d21m;
     always_ff @(posedge CLK_21M or negedge RESET_n) begin
