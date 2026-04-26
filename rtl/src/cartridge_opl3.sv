@@ -73,26 +73,42 @@ module CARTRIDGE_OPL3 (
     /* verilator lint_on PINMISSING */
 
     /***************************************************************
-     * Promedio L+R y truncado a SOUND_BIT_WIDTH bits (signed, top=signo)
-     * — patrón siguiendo cartridge_fm.sv IKAOPLL.
+     * Promedio L+R, amplificación con shift-left saturante (64x), y
+     * truncado a SOUND_BIT_WIDTH bits (signed, top=signo).
+     * Sin amplificación el rango efectivo del core gtaylormb (~±2^17
+     * dentro del DAC de 24 bits) deja el signal a 1/64 de full-scale
+     * en 10 bits, audible pero muy bajo. GAIN_BITS=6 (64x) lleva el
+     * pico típico cerca de full-scale 10-bit con saturación en peaks.
      ***************************************************************/
     localparam DAC_W = opl3_pkg::DAC_OUTPUT_WIDTH;
     localparam SND_W = $bits(Sound.Signal);
+    localparam GAIN_BITS = 6;
 
     logic signed [DAC_W-1:0] mono_q;
     always_ff @(posedge CLK_OPL3) begin
-        // Suma con sign-extend a (DAC_W+1) bits, luego >>> 1 para promediar
         mono_q <= DAC_W'(({sample_l[DAC_W-1], sample_l} + {sample_r[DAC_W-1], sample_r}) >>> 1);
     end
 
-    // Cruce de dominio CLK_OPL3 → CLK por simple registro. Las muestras son
-    // continuas (waveform), 1-ciclo de glitch puntual no es audible.
+    // Saturating shift-left por GAIN_BITS: detecta si los GAIN_BITS bits
+    // por debajo del signo no coinciden con el signo (overflow), y satura.
+    wire signed [DAC_W-1:0] mono_shifted = mono_q <<< GAIN_BITS;
+    wire ovf_pos = !mono_q[DAC_W-1] &&  |mono_q[DAC_W-2 -: GAIN_BITS];
+    wire ovf_neg =  mono_q[DAC_W-1] && ~&mono_q[DAC_W-2 -: GAIN_BITS];
+
+    logic signed [DAC_W-1:0] mono_amp;
+    always_ff @(posedge CLK_OPL3) begin
+        if (ovf_pos)      mono_amp <= {1'b0, {(DAC_W-1){1'b1}}};
+        else if (ovf_neg) mono_amp <= {1'b1, {(DAC_W-1){1'b0}}};
+        else              mono_amp <= mono_shifted;
+    end
+
+    // Cruce de dominio CLK_OPL3 → CLK por simple registro.
     always_ff @(posedge CLK or negedge RESET_n) begin
         if(!RESET_n || !Bus.RESET_n) begin
             Sound.Signal <= 0;
         end
         else begin
-            Sound.Signal <= mono_q[DAC_W-1 : DAC_W-SND_W];
+            Sound.Signal <= mono_amp[DAC_W-1 -: SND_W];
         end
     end
 

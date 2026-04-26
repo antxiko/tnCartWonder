@@ -25,7 +25,7 @@ package opl3_pkg;
     // MangOPL4: 134.25 MHz / 4 = 33.5625 MHz (CLKDIV en u_div_opl3)
     localparam CLK_FREQ = 33.5625e6;
     localparam DAC_OUTPUT_WIDTH = 24;
-    localparam INSTANTIATE_TIMERS = 0; // set to 1 to use timers, 0 to save area
+    localparam INSTANTIATE_TIMERS = 1; // MangOPL4: ON para detección OPL3 (Timer1+Timer2 + status bits)
     localparam NUM_LEDS = 4; // connected to kon bank 0 starting at 0
     localparam INSTANTIATE_SAMPLE_SYNC_TO_DAC_CLK = 0;
 
