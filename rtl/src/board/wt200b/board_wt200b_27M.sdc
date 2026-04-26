@@ -42,6 +42,12 @@ create_generated_clock -name CLK_5_4M -source [get_ports {CLK_27M}] -master_cloc
 create_generated_clock -name CLK_DAC -source [get_ports {CLK_27M}] -master_clock CLK_27M -divide_by 35 -multiply_by 2 -add [get_pins {u_clk/u_div_dac/CLKOUT}]
 
 //------------------------
+// MangOPL4 OPL3
+//------------------------
+// 33.5625MHz(CLK_OPL3 = CLK_TMDS_S / 4)
+create_generated_clock -name CLK_OPL3 -source [get_nets {CLK_TMDS_S}] -master_clock CLK_TMDS_S -divide_by 4 -multiply_by 1 -add [get_pins {u_clk/u_div_opl3/CLKOUT}]
+
+//------------------------
 // グループ
 //------------------------
-set_clock_groups -asynchronous -group [get_clocks {CLK_3_58M}] -group [get_clocks {CLK_BASE CLK_21M}] -group [get_clocks {DCLK}] -group [get_clocks {CLK_TMDS_S CLK_TMDS_P}] -group [get_clocks {CLK_27M CLK_DAC}]
+set_clock_groups -asynchronous -group [get_clocks {CLK_3_58M}] -group [get_clocks {CLK_BASE CLK_21M}] -group [get_clocks {DCLK}] -group [get_clocks {CLK_TMDS_S CLK_TMDS_P CLK_OPL3}] -group [get_clocks {CLK_27M CLK_DAC}]
