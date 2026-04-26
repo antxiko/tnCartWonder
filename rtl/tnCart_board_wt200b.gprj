@@ -98,5 +98,37 @@
         <File path="src/board/wt200b/board_wt200b.cst" type="file.cst" enable="1"/>
         <File path="src/board/wt200b/board_wt200b_27M.sdc" type="file.sdc" enable="1"/>
         <File path="src/board/wt200b/board_wt200b_3_58M.sdc" type="file.sdc" enable="0"/>
+        <File path="src/opl3_pkg_mangopl4.sv" type="file.verilog" enable="1"/>
+        <File path="src/cartridge_opl3.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/top_level/src/opl3.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/channels/src/dac_prep.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/channels/src/channels.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/channels/src/control_operators.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/clks/src/clk_div.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/clks/src/reset_sync.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/operator/src/operator.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/operator/src/calc_phase_inc.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/operator/src/calc_rhythm_phase.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/operator/src/phase_generator.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/operator/src/vibrato.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/operator/src/envelope_generator.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/operator/src/ksl_add_rom.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/operator/src/calc_envelope_shift.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/operator/src/tremolo.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/operator/src/opl3_log_sine_lut.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/operator/src/opl3_exp_lut.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/timers/src/timers.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/timers/src/timer.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/misc/src/afifo.v" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/misc/src/edge_detector.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/misc/src/mem_simple_dual_port_async_read.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/misc/src/mem_simple_dual_port.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/misc/src/mem_multi_bank.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/misc/src/mem_multi_bank_reset.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/misc/src/pipeline_sr.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/misc/src/synchronizer.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/misc/src/leds.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/host_if/src/host_if.sv" type="file.verilog" enable="1"/>
+        <File path="../../opl3_fpga/fpga/modules/host_if/src/trick_sw_detection.sv" type="file.verilog" enable="1"/>
     </FileList>
 </Project>

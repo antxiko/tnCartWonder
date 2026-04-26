@@ -55,7 +55,12 @@ module BOARD_WT200B_CLOCK /* synthesis syn_preserve=1 */ (
 
     output wire     CLK_TMDS_S,
     output wire     CLK_TMDS_P,
-    output wire     CLK_TMDS_READY
+    output wire     CLK_TMDS_READY,
+
+    // MangOPL4: 134.25MHz / 4 = 33.5625MHz, alimenta el core OPL3
+    // (gtaylormb/opl3_fpga). Error -0.9% respecto 33.8688 MHz nominal
+    // OPL4, compensado en opl3_pkg.sv local con CLK_DIV_COUNT=678.
+    output wire     CLK_OPL3
 );
     /***************************************************************
      * 基本クロック
@@ -257,6 +262,18 @@ end
     );
     defparam u_div_dac.DIV_MODE = "3.5";
     defparam u_div_dac.GSREN = "false";
+
+    /***************************************************************
+     * MangOPL4: 134.25MHz / 4 = 33.5625MHz para el core OPL3
+     ***************************************************************/
+    CLKDIV u_div_opl3 (
+        .CLKOUT(CLK_OPL3),
+        .HCLKIN(CLK_TMDS_S),
+        .RESETN(CLK_TMDS_READY),
+        .CALIB(1'b0)
+    );
+    defparam u_div_opl3.DIV_MODE = "4";
+    defparam u_div_opl3.GSREN = "false";
 
 endmodule
 

@@ -1,1 +1,14 @@
 /.vscode
+
+# Gowin build artifacts (MangOPL4)
+rtl/impl/pnr/cmd.do
+rtl/impl/pnr/device.cfg
+rtl/impl/pnr/*.bin
+rtl/impl/pnr/*.binx
+rtl/impl/pnr/*.db
+rtl/impl/pnr/*.log
+rtl/impl/pnr/*.html
+rtl/impl/pnr/*.rpt.txt
+rtl/impl/pnr/*.timing_paths
+rtl/impl/temp/
+rtl/*.gprj.user

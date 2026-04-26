@@ -38,6 +38,7 @@ module MAIN #(
 ) (
     input   wire            RESET_n,
     input   wire            CLK,
+    input   wire            CLK_OPL3,           // MangOPL4: 33.5625 MHz para core OPL3
     BUS_IF.CARTRIDGE        Bus,                // BUS I/F
     RAM_IF.HOST             Ram,                // RAM I/F
     RAM_IF                  VideoRam,           // VRAM I/F
@@ -57,7 +58,8 @@ module MAIN #(
     localparam SOUND_FM_INT  = 1;
     localparam SOUND_FM_EXT  = 2;
     localparam SOUND_PSG     = 3;
-    localparam SOUND_COUNT   = 4;
+    localparam SOUND_OPL3    = 4;       // MangOPL4
+    localparam SOUND_COUNT   = 5;
     SOUND_IF #(.BIT_WIDTH(CONFIG::SOUND_BIT_WIDTH)) Sound[0:SOUND_COUNT-1]();
 
     /***************************************************************
@@ -89,7 +91,8 @@ module MAIN #(
     localparam BUS_RAM     = 3;
     localparam BUS_PSG     = 4;     // SLTSL_n 信号なし(I/Oのみ)
     localparam BUS_V9990   = 5;     // SLTSL_n 信号なし(I/Oのみ)
-    localparam BUS_COUNT   = 6;
+    localparam BUS_OPL3    = 6;     // MangOPL4: I/O C4-C7h, sin SLTSL_n
+    localparam BUS_COUNT   = 7;
     BUS_IF  ExpBus[0:BUS_COUNT-1]();
     EXPANSION_SLOT #(
         .COUNT          (BUS_COUNT),
@@ -258,6 +261,23 @@ module MAIN #(
     end
 
     /***************************************************************
+     * MangOPL4 OPL3 (MoonSound FM) カートリッジ — C4h-C7h
+     ***************************************************************/
+    if(CONFIG::ENABLE_OPL3) begin
+        CARTRIDGE_OPL3 u_opl3 (
+            .RESET_n        (SYS_RESET_n),
+            .CLK,
+            .CLK_OPL3       (CLK_OPL3),
+            .Bus            (ExpBus[BUS_OPL3]),
+            .Sound          (Sound[SOUND_OPL3])
+        );
+    end
+    else begin
+        always_comb ExpBus[BUS_OPL3].connect_dummy();
+        always_comb Sound[SOUND_OPL3].connect_dummy();
+    end
+
+    /***************************************************************
      * V9990 カートリッジ
      ***************************************************************/
     if(CONFIG::ENABLE_V9990) begin
@@ -321,7 +341,8 @@ module MAIN #(
     localparam SOUND_EXT_MEGAROM = 0;
     localparam SOUND_EXT_FM      = 1;
     localparam SOUND_EXT_PSG     = 2;
-    localparam SOUND_EXT_COUNT   = 3;
+    localparam SOUND_EXT_OPL3    = 3;       // MangOPL4
+    localparam SOUND_EXT_COUNT   = 4;
     SOUND_IF #(.BIT_WIDTH($bits(Sound[0].Signal))) AttOutExt[0:SOUND_EXT_COUNT-1]();
 
     if(CONFIG::ENABLE_MEGAROM) begin
@@ -369,6 +390,21 @@ module MAIN #(
         always_comb AttOutExt[SOUND_EXT_PSG].connect_dummy();
     end
 
+    if(CONFIG::ENABLE_OPL3) begin
+        SOUND_ATTENUATOR #(
+            .MUL(CONFIG::ATT_EXT_OPL3_MUL),
+            .DIV(CONFIG::ATT_EXT_OPL3_DIV)
+        ) u_att_ext_opl3 (
+            .RESET_n,
+            .CLK,
+            .IN(Sound[SOUND_OPL3]),
+            .OUT(AttOutExt[SOUND_EXT_OPL3])
+        );
+    end
+    else begin
+        always_comb AttOutExt[SOUND_EXT_OPL3].connect_dummy();
+    end
+
     SOUND_IF #(.BIT_WIDTH($bits(AttOutExt[0].Signal))) mix_ext();
 
     SOUND_MIXER #(
@@ -402,7 +438,8 @@ module MAIN #(
      ***************************************************************/
     localparam SOUND_INT_MEGAROM = 0;
     localparam SOUND_INT_FM      = 1;
-    localparam SOUND_INT_COUNT   = 2;
+    localparam SOUND_INT_OPL3    = 2;       // MangOPL4
+    localparam SOUND_INT_COUNT   = 3;
     SOUND_IF #(.BIT_WIDTH($bits(Sound[0].Signal))) AttOutInt[0:SOUND_INT_COUNT-1]();
 
     if(CONFIG::ENABLE_MEGAROM) begin
@@ -433,6 +470,21 @@ module MAIN #(
     end
     else begin
         always_comb AttOutInt[SOUND_INT_FM].connect_dummy();
+    end
+
+    if(CONFIG::ENABLE_OPL3) begin
+        SOUND_ATTENUATOR #(
+            .MUL(CONFIG::ATT_INT_OPL3_MUL),
+            .DIV(CONFIG::ATT_INT_OPL3_DIV)
+        ) u_att_int_opl3 (
+            .RESET_n,
+            .CLK,
+            .IN(Sound[SOUND_OPL3]),
+            .OUT(AttOutInt[SOUND_INT_OPL3])
+        );
+    end
+    else begin
+        always_comb AttOutInt[SOUND_INT_OPL3].connect_dummy();
     end
 
     SOUND_IF #(.BIT_WIDTH($bits(AttOutInt[0].Signal))) mix_int();

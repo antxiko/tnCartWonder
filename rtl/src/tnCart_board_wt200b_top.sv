@@ -116,6 +116,7 @@ module TNCART_BOARD_WT200B_TOP (
     logic CLK_TMDS_READY;
     logic CLK_21M/* synthesis syn_keep=1 */;
     logic CLK_DAC/* synthesis syn_keep=1 */;
+    logic CLK_OPL3/* synthesis syn_keep=1 */;
     BOARD_WT200B_CLOCK u_clk (
         .RESET_n        (1'b1),
         .CLK_IN         (CONFIG_BOARD::SYNC_CPU_CLK ? CART_CLOCK : CLK_27M),
@@ -129,7 +130,8 @@ module TNCART_BOARD_WT200B_TOP (
         .CLK_TMDS_P,
         .CLK_TMDS_READY,
         .CLK_21M,
-        .CLK_DAC
+        .CLK_DAC,
+        .CLK_OPL3
     );
 
     /***************************************************************
@@ -397,6 +399,7 @@ module TNCART_BOARD_WT200B_TOP (
     MAIN u_main (
         .RESET_n,
         .CLK,
+        .CLK_OPL3,
         .Bus,
         .Ram            (UmaRam[0]),
         .VideoRam       (UmaRam[1]),
