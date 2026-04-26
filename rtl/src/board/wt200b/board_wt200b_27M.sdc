@@ -20,8 +20,8 @@ create_generated_clock -name CLK_BASE -source [get_ports {CLK_27M}] -master_cloc
 // 21.6MHz(CLK_21M = CLK_BASE / 5)
 create_generated_clock -name CLK_21M -source [get_nets {CLK_BASE}] -master_clock CLK_BASE -divide_by 5 -multiply_by 1 -add [get_nets {CLK_21M}]
 
-// 14.4MHz(DCLK = CLK_BASE / 7.5)
-create_generated_clock -name DCLK -source [get_nets {CLK_BASE}] -master_clock CLK_BASE -divide_by 15 -multiply_by 2 -duty_cycle 10 -offset 9.25 -add [get_nets {Video.DCLK}]
+// 14.4MHz(DCLK = CLK_BASE / 7.5) — MangOPL4: deshabilitado al desactivar V9990 (no hay net Video.DCLK)
+//create_generated_clock -name DCLK -source [get_nets {CLK_BASE}] -master_clock CLK_BASE -divide_by 15 -multiply_by 2 -duty_cycle 10 -offset 9.25 -add [get_nets {Video.DCLK}]
 
 //------------------------
 // TMDS
@@ -50,4 +50,4 @@ create_generated_clock -name CLK_OPL3 -source [get_nets {CLK_TMDS_S}] -master_cl
 //------------------------
 // グループ
 //------------------------
-set_clock_groups -asynchronous -group [get_clocks {CLK_3_58M}] -group [get_clocks {CLK_BASE CLK_21M}] -group [get_clocks {DCLK}] -group [get_clocks {CLK_TMDS_S CLK_TMDS_P CLK_OPL3}] -group [get_clocks {CLK_27M CLK_DAC}]
+set_clock_groups -asynchronous -group [get_clocks {CLK_3_58M}] -group [get_clocks {CLK_BASE CLK_21M}] -group [get_clocks {CLK_TMDS_S CLK_TMDS_P CLK_OPL3}] -group [get_clocks {CLK_27M CLK_DAC}]
