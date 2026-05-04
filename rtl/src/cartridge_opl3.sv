@@ -38,13 +38,63 @@ module CARTRIDGE_OPL3 (
     wire opl3_cs_n = !cs_opl3;
 
     /***************************************************************
-     * Lectura de status (registro C4h, address 00) — el core devuelve
-     * dout en dominio CLK (clk_host)
+     * Shadow register file — emula la legibilidad de registros
+     * OPL3 que tiene el YMF278B real (verificado en openMSX
+     * YMF278B.cc: read C5/C7 devuelve ymf262.readReg(opl3latch)).
+     * El core gtaylormb es OPL3 puro y no expone read-back; aquí
+     * capturamos las escrituras del bus y mantenemos un mirror de
+     * 256 bytes × 2 banks. Sin esto MoonBlaster FM y similares
+     * fallan la detección write/read-verify.
+     *
+     * En el YMF278B real, status read aparece en C4 Y C6
+     * (port&0x03 == 0 ó 2). Aquí lo replicamos.
+     ***************************************************************/
+    logic [7:0] shadow_b0 [0:255];
+    logic [7:0] shadow_b1 [0:255];
+    logic [7:0] sel_reg_b0 = 0;
+    logic [7:0] sel_reg_b1 = 0;
+
+    // Detecta flanco ascendente del strobe de escritura en el bus
+    logic prev_wr_active = 0;
+    wire  wr_active = cs_opl3 && !Bus.WR_n;
+    wire  wr_strobe = wr_active && !prev_wr_active;
+
+    always_ff @(posedge CLK or negedge RESET_n) begin
+        if (!RESET_n || !Bus.RESET_n) begin
+            prev_wr_active <= 1'b0;
+            sel_reg_b0 <= 8'd0;
+            sel_reg_b1 <= 8'd0;
+        end
+        else begin
+            prev_wr_active <= wr_active;
+            if (wr_strobe) begin
+                case (Bus.ADDR[1:0])
+                    2'b00: sel_reg_b0 <= Bus.DIN;
+                    2'b01: shadow_b0[sel_reg_b0] <= Bus.DIN;
+                    2'b10: sel_reg_b1 <= Bus.DIN;
+                    2'b11: shadow_b1[sel_reg_b1] <= Bus.DIN;
+                endcase
+            end
+        end
+    end
+
+    /***************************************************************
+     * Mux de lectura: status en C4/C6, registro shadow en C5/C7
      ***************************************************************/
     wire [7:0] opl3_dout;
-    wire status_read = rd_opl3 && (Bus.ADDR[1:0] == 2'b00);
-    assign Bus.BUSDIR_n = !status_read;
-    assign Bus.DOUT     = status_read ? opl3_dout : 8'h00;
+    logic [7:0] read_data;
+    always_comb begin
+        case (Bus.ADDR[1:0])
+            2'b00, 2'b10: read_data = opl3_dout;                  // status (mirror C4/C6)
+            2'b01:        read_data = shadow_b0[sel_reg_b0];      // bank 0 register
+            2'b11:        read_data = shadow_b1[sel_reg_b1];      // bank 1 register
+            default:      read_data = 8'h00;
+        endcase
+    end
+
+    // YMF278B drivea el bus en cualquier read C4-C7, no solo en status
+    assign Bus.BUSDIR_n = !rd_opl3;
+    assign Bus.DOUT     = rd_opl3 ? read_data : 8'h00;
 
     /***************************************************************
      * Instancia del core gtaylormb/opl3_fpga
