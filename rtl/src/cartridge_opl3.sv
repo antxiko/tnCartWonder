@@ -79,18 +79,22 @@ module CARTRIDGE_OPL3 (
     end
 
     /***************************************************************
-     * DEBUG MÁXIMO: TODOS los puertos C4-C7 devuelven 0x42 fijo
+     * Mux de lectura: status del core en C4/C6, registro shadow en
+     * C5/C7. YMF278B drivea en cualquier read C4-C7.
      ***************************************************************/
     wire [7:0] opl3_dout;
-
-    /* verilator lint_off UNUSEDSIGNAL */
-    wire [7:0] _unused_b0 = shadow_b0[sel_reg_b0];
-    wire [7:0] _unused_b1 = shadow_b1[sel_reg_b1];
-    wire [7:0] _unused_dout = opl3_dout;
-    /* verilator lint_on UNUSEDSIGNAL */
+    logic [7:0] read_data;
+    always_comb begin
+        case (Bus.ADDR[1:0])
+            2'b00, 2'b10: read_data = opl3_dout;                  // status (mirror C4/C6)
+            2'b01:        read_data = shadow_b0[sel_reg_b0];      // bank 0 register
+            2'b11:        read_data = shadow_b1[sel_reg_b1];      // bank 1 register
+            default:      read_data = 8'h00;
+        endcase
+    end
 
     assign Bus.BUSDIR_n = !rd_opl3;
-    assign Bus.DOUT     = rd_opl3 ? 8'h42 : 8'h00;
+    assign Bus.DOUT     = rd_opl3 ? read_data : 8'h00;
 
     /***************************************************************
      * Instancia del core gtaylormb/opl3_fpga
