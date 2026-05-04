@@ -38,6 +38,19 @@ module CARTRIDGE_OPL3 (
     wire opl3_cs_n = !cs_opl3;
 
     /***************************************************************
+     * Stub puerto Wave 7Eh-7Fh — necesario para que VGMPlay y otros
+     * detecten MoonSound. La detección lee 7F esperando bits superiores
+     * 001xxxxx. Sin esto, VGMPlay falla la detección de OPL4 y cae a
+     * "standalone OPL3 a C0-C3", donde no hay nadie escuchando.
+     * No implementamos Wave/PCM real (Fase 2), solo el read-back que
+     * pasa la detección. 7E (latch) deja flotar el bus (FF, igual que
+     * el YMF278B real).
+     ***************************************************************/
+    wire cs_wave  = !Bus.IORQ_n && (Bus.ADDR[7:1] == 7'b0111111);
+    wire rd_wave  = cs_wave && !Bus.RD_n;
+    wire rd_wave_data = rd_wave && Bus.ADDR[0];   // solo 7F drivea
+
+    /***************************************************************
      * Shadow register file — emula la legibilidad de registros
      * OPL3 que tiene el YMF278B real (verificado en openMSX
      * YMF278B.cc: read C5/C7 devuelve ymf262.readReg(opl3latch)).
@@ -93,8 +106,11 @@ module CARTRIDGE_OPL3 (
         endcase
     end
 
-    assign Bus.BUSDIR_n = !rd_opl3;
-    assign Bus.DOUT     = rd_opl3 ? read_data : 8'h00;
+    // YMF278B drivea bus en cualquier read C4-C7 + 7F (7E flota)
+    assign Bus.BUSDIR_n = !(rd_opl3 || rd_wave_data);
+    assign Bus.DOUT     = rd_opl3       ? read_data :
+                          rd_wave_data  ? 8'h20      :   // stub Wave passes detect
+                                          8'h00;
 
     /***************************************************************
      * Instancia del core gtaylormb/opl3_fpga
