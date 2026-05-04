@@ -79,32 +79,18 @@ module CARTRIDGE_OPL3 (
     end
 
     /***************************************************************
-     * Mux de lectura — DEBUG: hardcoded magic values en C5/C7 para
-     * verificar si el path de lectura funciona. Si el MSX lee 0xA5
-     * en C5 y 0x5A en C7, sabemos que BUSDIR_n + DOUT llegan bien.
-     * Si sigue dando 0xFF, hay bug en el path. Si OK, volvemos a
-     * shadow_b0[sel_reg_b0] etc.
+     * DEBUG MÁXIMO: TODOS los puertos C4-C7 devuelven 0x42 fijo
      ***************************************************************/
     wire [7:0] opl3_dout;
-    logic [7:0] read_data;
-    always_comb begin
-        case (Bus.ADDR[1:0])
-            2'b00, 2'b10: read_data = opl3_dout;                  // status (mirror C4/C6)
-            2'b01:        read_data = 8'hA5;                      // DEBUG hardcoded
-            2'b11:        read_data = 8'h5A;                      // DEBUG hardcoded
-            default:      read_data = 8'h00;
-        endcase
-    end
 
-    // Suprimir warnings de unused (shadow declarado pero no usado en debug)
     /* verilator lint_off UNUSEDSIGNAL */
     wire [7:0] _unused_b0 = shadow_b0[sel_reg_b0];
     wire [7:0] _unused_b1 = shadow_b1[sel_reg_b1];
+    wire [7:0] _unused_dout = opl3_dout;
     /* verilator lint_on UNUSEDSIGNAL */
 
-    // YMF278B drivea el bus en cualquier read C4-C7, no solo en status
     assign Bus.BUSDIR_n = !rd_opl3;
-    assign Bus.DOUT     = rd_opl3 ? read_data : 8'h00;
+    assign Bus.DOUT     = rd_opl3 ? 8'h42 : 8'h00;
 
     /***************************************************************
      * Instancia del core gtaylormb/opl3_fpga
