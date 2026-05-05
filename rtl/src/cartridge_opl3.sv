@@ -25,12 +25,50 @@ module CARTRIDGE_OPL3 (
 );
 
     /***************************************************************
-     * 未使用の出力信号の処理 — IRQ revertida temporalmente, causa cuelgue
-     * pre-playback en VGMPlay (probablemente glitch power-on de irq_n).
-     * Pendiente: implementar gate más robusto antes de re-conectar.
+     * Bus.INT_n: IRQ del core OPL3 (Timer1/Timer2 overflow) hacia el
+     * MSX. Imprescindible para VGMPlay-MSX que usa Timer1 a 1130 Hz
+     * como fuente de tiempo cuando detecta MoonSound.
+     *
+     * Cadena:
+     *   1. settle_count en CLK_OPL3 espera 31 ciclos tras reset para
+     *      darle tiempo al FF irq_n del core a estabilizar a 1
+     *      (Gowin no respeta `= 0` en output ports → glitch power-on).
+     *   2. irq_n_gated = irq_n_raw del core, gated por settle_count.
+     *   3. Sincronizador 2-FF a CLK (clk_host del bus MSX).
+     *
+     * Sin esto, Z80 entra en IM 2 ISR de un IRQ fantasma al power-on
+     * y se cuelga en bucle infinito.
      ***************************************************************/
-    assign Bus.INT_n = 1;
     assign Bus.WAIT_n = 1;
+    wire opl3_irq_n_raw;
+
+    logic [4:0] settle_count = 0;
+    always_ff @(posedge CLK_OPL3 or negedge RESET_n) begin
+        if (!RESET_n)                       settle_count <= 5'd0;
+        else if (!Bus.RESET_n)              settle_count <= 5'd0;
+        else if (settle_count != 5'h1F)     settle_count <= settle_count + 5'd1;
+    end
+
+    logic irq_n_gated;
+    always_ff @(posedge CLK_OPL3 or negedge RESET_n) begin
+        if (!RESET_n)                       irq_n_gated <= 1'b1;
+        else if (!Bus.RESET_n)              irq_n_gated <= 1'b1;
+        else if (settle_count != 5'h1F)     irq_n_gated <= 1'b1;
+        else                                irq_n_gated <= opl3_irq_n_raw;
+    end
+
+    logic opl3_irq_n_s1, opl3_irq_n_s2;
+    always_ff @(posedge CLK or negedge RESET_n) begin
+        if (!RESET_n) begin
+            opl3_irq_n_s1 <= 1'b1;
+            opl3_irq_n_s2 <= 1'b1;
+        end
+        else begin
+            opl3_irq_n_s1 <= irq_n_gated;
+            opl3_irq_n_s2 <= opl3_irq_n_s1;
+        end
+    end
+    assign Bus.INT_n = opl3_irq_n_s2;
 
     /***************************************************************
      * Decodificación C4h-C7h (0xC4>>2 = 0x31 = 6'b110001)
