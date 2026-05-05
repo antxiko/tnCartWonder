@@ -25,26 +25,12 @@ module CARTRIDGE_OPL3 (
 );
 
     /***************************************************************
-     * Bus.INT_n: conecta la IRQ del core OPL3 (Timer1 / Timer2 over-
-     * flow) al MSX. VGMPlay-MSX y otros usan Timer1 del OPL3 como
-     * fuente de tiempo a 1130 Hz cuando detectan MoonSound. Sin esta
-     * IRQ, el Z80 cuelga esperando una interrupción que nunca llega.
-     * Sincronizador 2-FF de CLK_OPL3 a CLK por seguridad CDC.
+     * 未使用の出力信号の処理 — IRQ revertida temporalmente, causa cuelgue
+     * pre-playback en VGMPlay (probablemente glitch power-on de irq_n).
+     * Pendiente: implementar gate más robusto antes de re-conectar.
      ***************************************************************/
+    assign Bus.INT_n = 1;
     assign Bus.WAIT_n = 1;
-    wire opl3_irq_n_raw;
-    logic opl3_irq_n_s1, opl3_irq_n_s2;
-    always_ff @(posedge CLK or negedge RESET_n) begin
-        if (!RESET_n) begin
-            opl3_irq_n_s1 <= 1'b1;
-            opl3_irq_n_s2 <= 1'b1;
-        end
-        else begin
-            opl3_irq_n_s1 <= opl3_irq_n_raw;
-            opl3_irq_n_s2 <= opl3_irq_n_s1;
-        end
-    end
-    assign Bus.INT_n = opl3_irq_n_s2;
 
     /***************************************************************
      * Decodificación C4h-C7h (0xC4>>2 = 0x31 = 6'b110001)
