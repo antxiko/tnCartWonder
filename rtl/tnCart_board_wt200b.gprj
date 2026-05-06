@@ -99,6 +99,9 @@
         <File path="src/board/wt200b/board_wt200b_27M.sdc" type="file.sdc" enable="1"/>
         <File path="src/board/wt200b/board_wt200b_3_58M.sdc" type="file.sdc" enable="0"/>
         <File path="src/opl3_pkg_mangopl4.sv" type="file.verilog" enable="1"/>
+        <File path="src/wave/ymf278_pkg.sv" type="file.verilog" enable="1"/>
+        <File path="src/wave/ymf278_regfile.sv" type="file.verilog" enable="1"/>
+        <File path="src/wave/ymf278_top.sv" type="file.verilog" enable="1"/>
         <File path="src/cartridge_opl3.sv" type="file.verilog" enable="1"/>
         <File path="../../opl3_fpga/fpga/modules/top_level/src/opl3.sv" type="file.verilog" enable="1"/>
         <File path="../../opl3_fpga/fpga/modules/channels/src/dac_prep.sv" type="file.verilog" enable="1"/>

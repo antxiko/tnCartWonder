@@ -141,17 +141,26 @@ module CARTRIDGE_OPL3 (
     wire opl3_cs_n = !cs_opl3;
 
     /***************************************************************
-     * Stub puerto Wave 7Eh-7Fh — necesario para que VGMPlay y otros
-     * detecten MoonSound. La detección lee 7F esperando bits superiores
-     * 001xxxxx. Sin esto, VGMPlay falla la detección de OPL4 y cae a
-     * "standalone OPL3 a C0-C3", donde no hay nadie escuchando.
-     * No implementamos Wave/PCM real (Fase 2), solo el read-back que
-     * pasa la detección. 7E (latch) deja flotar el bus (FF, igual que
-     * el YMF278B real).
+     * Puerto Wave 7Eh-7Fh — Fase 2 sub-fase 2a:
+     * decodificación + edge detection del write strobe del bus MSX.
+     * El motor real vive en wave/ymf278_top.sv. En 2a solo produce una
+     * onda cuadrada interna cuando se hace key-on en slot 0
+     * (registro 0x68 bit 7). Read-back sigue devolviendo 0x20 stub
+     * para preservar detección MoonSound de VGMPlay.
      ***************************************************************/
     wire cs_wave  = !Bus.IORQ_n && (Bus.ADDR[7:1] == 7'b0111111);
     wire rd_wave  = cs_wave && !Bus.RD_n;
     wire rd_wave_data = rd_wave && Bus.ADDR[0];   // solo 7F drivea
+
+    // Edge detection del write strobe del puerto Wave (mismo patrón
+    // que el OPL3 más abajo, pero independiente).
+    logic prev_wave_wr_active = 0;
+    wire  wave_wr_active = cs_wave && !Bus.WR_n;
+    wire  wave_wr_strobe = wave_wr_active && !prev_wave_wr_active;
+    always_ff @(posedge CLK or negedge RESET_n) begin
+        if (!RESET_n || !Bus.RESET_n) prev_wave_wr_active <= 1'b0;
+        else                          prev_wave_wr_active <= wave_wr_active;
+    end
 
     /***************************************************************
      * Shadow register file — emula la legibilidad de registros
@@ -209,10 +218,31 @@ module CARTRIDGE_OPL3 (
         endcase
     end
 
+    /***************************************************************
+     * Motor Wave (Fase 2). En 2a produce square wave interna en slot 0
+     * cuando se hace key-on (write a registro 0x68 con bit 7).
+     ***************************************************************/
+    // Width 24 hardcoded para evitar dependencia de DAC_W (declarado más
+     // abajo). opl3_pkg::DAC_OUTPUT_WIDTH = 24.
+    wire [7:0]               wave_rd_data;
+    wire signed [23:0]       wave_sample;
+    ymf278_top u_wave (
+        .RESET_n        (RESET_n),
+        .CLK            (CLK),
+        .CLK_OPL3       (CLK_OPL3),
+        .bus_reset_n    (Bus.RESET_n),
+        .new2           (shadow_b1[8'h05][1]),  // bit 1 = NEW2 (verificado en openMSX YMF278B.cc:203)
+        .wr_strobe      (wave_wr_strobe),
+        .addr0          (Bus.ADDR[0]),
+        .din            (Bus.DIN),
+        .rd_data        (wave_rd_data),
+        .wave_sample    (wave_sample)
+    );
+
     // YMF278B drivea bus en cualquier read C4-C7 + 7F (7E flota)
     assign Bus.BUSDIR_n = !(rd_opl3 || rd_wave_data);
     assign Bus.DOUT     = rd_opl3       ? read_data :
-                          rd_wave_data  ? 8'h20      :   // stub Wave passes detect
+                          rd_wave_data  ? wave_rd_data :  // 0x20 stub en 2a
                                           8'h00;
 
     /***************************************************************
@@ -248,20 +278,32 @@ module CARTRIDGE_OPL3 (
     /* verilator lint_on PINMISSING */
 
     /***************************************************************
-     * Promedio L+R, amplificación con shift-left saturante (64x), y
-     * truncado a SOUND_BIT_WIDTH bits (signed, top=signo).
+     * Promedio L+R del FM, sumado con wave_sample (Wave block), luego
+     * amplificación con shift-left saturante (64x), y truncado a
+     * SOUND_BIT_WIDTH bits (signed, top=signo).
+     *
      * Sin amplificación el rango efectivo del core gtaylormb (~±2^17
      * dentro del DAC de 24 bits) deja el signal a 1/64 de full-scale
      * en 10 bits, audible pero muy bajo. GAIN_BITS=6 (64x) lleva el
      * pico típico cerca de full-scale 10-bit con saturación en peaks.
+     *
+     * wave_sample ya viene en formato 24-bit signed (sign-extended
+     * desde 16-bit) por lo que se suma directamente al FM averaged.
+     * En 2a el wave_sample tiene rango ±2^14 (square wave 16-bit
+     * a media escala), que tras gain 64x queda a ±2^20 ≈ 1/8 de
+     * full-scale 24-bit. Audible sin saturar.
      ***************************************************************/
     localparam DAC_W = opl3_pkg::DAC_OUTPUT_WIDTH;
     localparam SND_W = $bits(Sound.Signal);
     localparam GAIN_BITS = 6;
 
+    // FM mono averaged + Wave summed, todo en CLK_OPL3 domain.
     logic signed [DAC_W-1:0] mono_q;
     always_ff @(posedge CLK_OPL3) begin
-        mono_q <= DAC_W'(({sample_l[DAC_W-1], sample_l} + {sample_r[DAC_W-1], sample_r}) >>> 1);
+        mono_q <= DAC_W'(
+            (({sample_l[DAC_W-1], sample_l} + {sample_r[DAC_W-1], sample_r}) >>> 1)
+            + {wave_sample[DAC_W-1], wave_sample}   // sign-extend 1 bit y sumar
+        );
     end
 
     // Saturating shift-left por GAIN_BITS: detecta si los GAIN_BITS bits
