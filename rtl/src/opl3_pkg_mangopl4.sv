@@ -69,6 +69,14 @@ package opl3_pkg;
     localparam TIMER1_TICK_INTERVAL = 80e-6;  // in seconds
     localparam TIMER2_TICK_INTERVAL = 320e-6; // in seconds
 
+    // mangopl4: TICK_COUNT precomputado como entero. Gowin trunca mal
+    // CLK_FREQ*TIMER_TICK_INTERVAL (WARN EX3791 size 64→32) dando un
+    // valor erróneo, lo que ralentiza Timer1 ~30x y rompe la base de
+    // tiempo de VGMPlay-MSX (música reproduce muy lenta).
+    // 33.5625e6 Hz * 80e-6 s = 2685 ; * 320e-6 = 10740
+    localparam int TIMER1_TICK_COUNT = 2685;
+    localparam int TIMER2_TICK_COUNT = 10740;
+
     typedef enum logic [2:0] {
         OP_NORMAL,
         OP_BASS_DRUM,
