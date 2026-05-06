@@ -237,7 +237,13 @@ module CARTRIDGE_OPL3 (
         .sample_l       (sample_l),
         .sample_r       (sample_r),
         .led            (),
-        .irq_n          (opl3_irq_n_raw)
+        .irq_n          (opl3_irq_n_raw),
+        // mangopl4: cuando el watchdog del IRQ se rinde, también
+        // forzamos limpieza de st1/st2/ft1/ft2 dentro del core. Sin
+        // esto, tras un exit "natural" de VGMPlay (Timer1 sigue
+        // corriendo, ft1 sticky), el siguiente arranque no detecta
+        // MoonSound porque el chip no se reinicializa limpio.
+        .force_clear_flags (gave_up)
     );
     /* verilator lint_on PINMISSING */
 
