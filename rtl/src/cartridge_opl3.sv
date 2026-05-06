@@ -54,36 +54,49 @@ module CARTRIDGE_OPL3 (
     end
     wire armed = (settle_count == 5'h1F);
 
-    // Detección flanco ascendente de "IRQ activa" (irq_n_raw va 1→0)
-    logic prev_irq_active;
+    // Generador de IRQ con pulso + gap + repeat:
+    //   - Mientras irq_active=1 (ft1=1 en el core), genera pulsos
+    //     periódicos de PULSE µs separados por GAP µs.
+    //   - Si software limpia ft1 (irq_active=0), reseteo todo.
+    // PULSE 5 µs: corto para no causar re-IRQ tras BIOS handler RETI.
+    // GAP 50 µs: > BIOS handler (~50 µs), permite RETI antes del próximo.
+    // Esto recupera de IRQs perdidos por DI: el siguiente pulso se
+    // dispara aunque el flanco original ya pasase.
     wire  irq_active = !opl3_irq_n_raw;
-    wire  irq_rising = armed && irq_active && !prev_irq_active;
-
-    // Contador de pulso INT_n bajo. ~5 µs a 33.5625 MHz = 168 ciclos.
-    // Sweet spot: más corto que el BIOS IRQ handler (~50 µs) para evitar
-    // re-IRQ tras RETI durante DETECCIÓN (donde el handler de VGMPlay aún
-    // no está instalado), pero suficiente (>> sampling window Z80 ~6 µs?
-    // — Z80 sampling es por instrucción, ~1-2 µs). Auto-deasserta si
-    // software limpia ft1 antes (handler de VGMPlay durante PLAYBACK).
-    localparam INT_PULSE_CYCLES = 9'd168;
-    logic [8:0] pulse_count;
+    localparam PULSE_CYCLES = 11'd168;   // 5 µs
+    localparam GAP_CYCLES   = 11'd1678;  // 50 µs
+    logic [10:0] state_count;
+    logic        in_pulse;   // 1 = pulse phase (INT_n bajo), 0 = gap phase
     always_ff @(posedge CLK_OPL3 or negedge RESET_n) begin
         if (!RESET_n) begin
-            prev_irq_active <= 1'b0;
-            pulse_count     <= 9'd0;
+            state_count <= 11'd0;
+            in_pulse    <= 1'b0;
         end
         else if (!Bus.RESET_n) begin
-            prev_irq_active <= 1'b0;
-            pulse_count     <= 9'd0;
+            state_count <= 11'd0;
+            in_pulse    <= 1'b0;
+        end
+        else if (!armed || !irq_active) begin
+            // No IRQ pendiente o aún en settle. Reset máquina.
+            state_count <= 11'd0;
+            in_pulse    <= 1'b0;
+        end
+        else if (state_count == 11'd0) begin
+            // Fin de fase actual. Toggle pulse/gap.
+            if (in_pulse) begin
+                state_count <= GAP_CYCLES - 11'd1;
+                in_pulse    <= 1'b0;
+            end
+            else begin
+                state_count <= PULSE_CYCLES - 11'd1;
+                in_pulse    <= 1'b1;
+            end
         end
         else begin
-            prev_irq_active <= irq_active;
-            if (irq_rising)                       pulse_count <= INT_PULSE_CYCLES;
-            else if (!irq_active)                 pulse_count <= 9'd0;
-            else if (pulse_count != 9'd0)        pulse_count <= pulse_count - 9'd1;
+            state_count <= state_count - 11'd1;
         end
     end
-    wire int_n_pulse_clk_opl3 = (pulse_count == 9'd0);  // 1 cuando no en pulso
+    wire int_n_pulse_clk_opl3 = !in_pulse;  // 1 cuando NO en pulso
 
     // Sincronizador 2-FF a CLK (clk_host)
     logic int_n_s1, int_n_s2;
