@@ -59,26 +59,33 @@ module CARTRIDGE_OPL3 (
     wire  irq_active = !opl3_irq_n_raw;
     wire  irq_rising = armed && irq_active && !prev_irq_active;
 
-    // Contador de pulso INT_n bajo. ~10 µs a 33.5625 MHz = 335 ciclos
-    // (cabe en 9 bits, uso 10 para margen).
-    localparam INT_PULSE_CYCLES = 10'd335;
-    logic [9:0] pulse_count;
+    // Contador de pulso INT_n bajo. ~100 µs a 33.5625 MHz = 3356 ciclos
+    // (12 bits). El pulso se auto-deasserta si:
+    //   (a) llegan los 100 µs sin que el software lo limpie (BIOS handler
+    //       en detección — para evitar storm), o
+    //   (b) el software limpia ft1 antes (handler de VGMPlay) — en cuyo
+    //       caso irq_active=0 hace pulse_count <= 0 inmediatamente.
+    // Esto garantiza que Z80 tiene tiempo amplio (100 µs >> sampling
+    // window de 1-6 µs) sin causar IRQ storm.
+    localparam INT_PULSE_CYCLES = 12'd3356;
+    logic [11:0] pulse_count;
     always_ff @(posedge CLK_OPL3 or negedge RESET_n) begin
         if (!RESET_n) begin
             prev_irq_active <= 1'b0;
-            pulse_count     <= 10'd0;
+            pulse_count     <= 12'd0;
         end
         else if (!Bus.RESET_n) begin
             prev_irq_active <= 1'b0;
-            pulse_count     <= 10'd0;
+            pulse_count     <= 12'd0;
         end
         else begin
             prev_irq_active <= irq_active;
-            if (irq_rising)                  pulse_count <= INT_PULSE_CYCLES;
-            else if (pulse_count != 10'd0)   pulse_count <= pulse_count - 10'd1;
+            if (irq_rising)                       pulse_count <= INT_PULSE_CYCLES;
+            else if (!irq_active)                 pulse_count <= 12'd0;
+            else if (pulse_count != 12'd0)        pulse_count <= pulse_count - 12'd1;
         end
     end
-    wire int_n_pulse_clk_opl3 = (pulse_count == 10'd0);  // 1 cuando no en pulso
+    wire int_n_pulse_clk_opl3 = (pulse_count == 12'd0);  // 1 cuando no en pulso
 
     // Sincronizador 2-FF a CLK (clk_host)
     logic int_n_s1, int_n_s2;
