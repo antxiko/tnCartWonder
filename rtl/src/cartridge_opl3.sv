@@ -25,50 +25,74 @@ module CARTRIDGE_OPL3 (
 );
 
     /***************************************************************
-     * Bus.INT_n: IRQ del core OPL3 (Timer1/Timer2 overflow) hacia el
-     * MSX. Imprescindible para VGMPlay-MSX que usa Timer1 a 1130 Hz
-     * como fuente de tiempo cuando detecta MoonSound.
+     * Bus.INT_n: IRQ del core OPL3 hacia el MSX, en modo PULSO corto.
      *
-     * Cadena:
-     *   1. settle_count en CLK_OPL3 espera 31 ciclos tras reset para
-     *      darle tiempo al FF irq_n del core a estabilizar a 1
-     *      (Gowin no respeta `= 0` en output ports → glitch power-on).
-     *   2. irq_n_gated = irq_n_raw del core, gated por settle_count.
-     *   3. Sincronizador 2-FF a CLK (clk_host del bus MSX).
-     *
-     * Sin esto, Z80 entra en IM 2 ISR de un IRQ fantasma al power-on
-     * y se cuelga en bucle infinito.
+     * Razón: VGMPlay-MSX hace OPLTimer_Detect que arranca Timer1
+     * antes de instalar su propio IRQ handler. Si en ese momento
+     * tenemos INT_n asserted de forma sostenida, Z80 entra en BIOS
+     * ISR (JP 0x38) que no limpia ft1 del OPL3 → tormenta IRQ →
+     * cuelgue. Asserting INT_n como un pulso corto (~10 µs) en cada
+     * flanco ascendente de IRQ del core hace que:
+     *   - Z80 captura UN IRQ y va a BIOS handler
+     *   - Pulso expira antes de que BIOS handler retorne
+     *   - Tras RETI, INT_n alto, no re-IRQ
+     *   - Detection completa OK; status read sigue mostrando ft1=1
+     * Cuando VGMPlay luego instala su handler propio y arranca
+     * Timer1 a 1130 Hz, cada overflow genera un nuevo pulso → IRQ →
+     * handler limpia ft1 → siguiente overflow ya no se solapa.
      ***************************************************************/
     assign Bus.WAIT_n = 1;
     wire opl3_irq_n_raw;
 
+    // Settle counter — evita glitches power-on antes de empezar a
+    // mirar irq_n_raw (mismo motivo que antes: Gowin no honra init).
     logic [4:0] settle_count = 0;
     always_ff @(posedge CLK_OPL3 or negedge RESET_n) begin
         if (!RESET_n)                       settle_count <= 5'd0;
         else if (!Bus.RESET_n)              settle_count <= 5'd0;
         else if (settle_count != 5'h1F)     settle_count <= settle_count + 5'd1;
     end
+    wire armed = (settle_count == 5'h1F);
 
-    logic irq_n_gated;
+    // Detección flanco ascendente de "IRQ activa" (irq_n_raw va 1→0)
+    logic prev_irq_active;
+    wire  irq_active = !opl3_irq_n_raw;
+    wire  irq_rising = armed && irq_active && !prev_irq_active;
+
+    // Contador de pulso INT_n bajo. ~10 µs a 33.5625 MHz = 335 ciclos
+    // (cabe en 9 bits, uso 10 para margen).
+    localparam INT_PULSE_CYCLES = 10'd335;
+    logic [9:0] pulse_count;
     always_ff @(posedge CLK_OPL3 or negedge RESET_n) begin
-        if (!RESET_n)                       irq_n_gated <= 1'b1;
-        else if (!Bus.RESET_n)              irq_n_gated <= 1'b1;
-        else if (settle_count != 5'h1F)     irq_n_gated <= 1'b1;
-        else                                irq_n_gated <= opl3_irq_n_raw;
-    end
-
-    logic opl3_irq_n_s1, opl3_irq_n_s2;
-    always_ff @(posedge CLK or negedge RESET_n) begin
         if (!RESET_n) begin
-            opl3_irq_n_s1 <= 1'b1;
-            opl3_irq_n_s2 <= 1'b1;
+            prev_irq_active <= 1'b0;
+            pulse_count     <= 10'd0;
+        end
+        else if (!Bus.RESET_n) begin
+            prev_irq_active <= 1'b0;
+            pulse_count     <= 10'd0;
         end
         else begin
-            opl3_irq_n_s1 <= irq_n_gated;
-            opl3_irq_n_s2 <= opl3_irq_n_s1;
+            prev_irq_active <= irq_active;
+            if (irq_rising)                  pulse_count <= INT_PULSE_CYCLES;
+            else if (pulse_count != 10'd0)   pulse_count <= pulse_count - 10'd1;
         end
     end
-    assign Bus.INT_n = opl3_irq_n_s2;
+    wire int_n_pulse_clk_opl3 = (pulse_count == 10'd0);  // 1 cuando no en pulso
+
+    // Sincronizador 2-FF a CLK (clk_host)
+    logic int_n_s1, int_n_s2;
+    always_ff @(posedge CLK or negedge RESET_n) begin
+        if (!RESET_n) begin
+            int_n_s1 <= 1'b1;
+            int_n_s2 <= 1'b1;
+        end
+        else begin
+            int_n_s1 <= int_n_pulse_clk_opl3;
+            int_n_s2 <= int_n_s1;
+        end
+    end
+    assign Bus.INT_n = int_n_s2;
 
     /***************************************************************
      * Decodificación C4h-C7h (0xC4>>2 = 0x31 = 6'b110001)
