@@ -70,7 +70,8 @@ module MAIN #(
     localparam RAM_NEXTOR     = 2;
     localparam RAM_RAM        = 3;
     localparam RAM_BOOTLOADER = 4;
-    localparam RAM_COUNT      = 5;
+    localparam RAM_WAVE       = 5;     // MangOPL4 Fase 2 — Wave block YMF278B
+    localparam RAM_COUNT      = 6;
     RAM_IF ExpRam[0:RAM_COUNT-1]();
     EXPANSION_RAM #(
         .COUNT          (RAM_COUNT),
@@ -269,12 +270,23 @@ module MAIN #(
             .CLK,
             .CLK_OPL3       (CLK_OPL3),
             .Bus            (ExpBus[BUS_OPL3]),
-            .Sound          (Sound[SOUND_OPL3])
+            .Sound          (Sound[SOUND_OPL3]),
+            .Ram            (ExpRam[RAM_WAVE])      // MangOPL4 Fase 2: Wave SDRAM
         );
     end
     else begin
         always_comb ExpBus[BUS_OPL3].connect_dummy();
         always_comb Sound[SOUND_OPL3].connect_dummy();
+        // ExpRam[RAM_WAVE] queda en idle; el OR-collapse arbiter no lo
+        // verá si OE_n/WE_n están a 1 — drive defaults seguros aquí.
+        always_comb begin
+            ExpRam[RAM_WAVE].ADDR     = 24'h0;
+            ExpRam[RAM_WAVE].DIN      = 32'h0;
+            ExpRam[RAM_WAVE].DIN_SIZE = 3'b000;
+            ExpRam[RAM_WAVE].OE_n     = 1'b1;
+            ExpRam[RAM_WAVE].WE_n     = 1'b1;
+            ExpRam[RAM_WAVE].RFSH_n   = 1'b1;
+        end
     end
 
     /***************************************************************

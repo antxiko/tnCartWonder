@@ -21,7 +21,8 @@ module CARTRIDGE_OPL3 (
     input   wire            CLK,        // 107.4 MHz, dominio bus MSX (clk_host)
     input   wire            CLK_OPL3,   // 33.5625 MHz, dominio core OPL3
     BUS_IF.CARTRIDGE        Bus,
-    SOUND_IF.OUT            Sound
+    SOUND_IF.OUT            Sound,
+    RAM_IF.HOST             Ram         // MangOPL4 Fase 2: SDRAM para Wave
 );
 
     /***************************************************************
@@ -236,7 +237,8 @@ module CARTRIDGE_OPL3 (
         .addr0          (Bus.ADDR[0]),
         .din            (Bus.DIN),
         .rd_data        (wave_rd_data),
-        .wave_sample    (wave_sample)
+        .wave_sample    (wave_sample),
+        .Ram            (Ram)                    // SDRAM Wave (sin uso en 2a; usado en 2b+)
     );
 
     // YMF278B drivea bus en cualquier read C4-C7 + 7F (7E flota)

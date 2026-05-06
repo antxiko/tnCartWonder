@@ -102,6 +102,33 @@ package CONFIG;
     localparam [23:0]   RAM_ADDR_VRAM           = 24'h78_0000;
 
     /***************************************************************
+     * MangOPL4 Fase 2 — mapa SDRAM del Wave block del YMF278B
+     *
+     * 80_0000 +-------------------+
+     *         | YRW801 ROM (2MB)  |  copiada de FLASH al boot
+     * A0_0000 +-------------------+
+     *         | Sample RAM (2MB)  |  escribible vía regs 02-06
+     * C0_0000 +-------------------+  (libre)
+     *
+     * La traducción YMF278 24-bit addr → SDRAM addr es +0x80_0000
+     * (linealmente para todo el rango 0..3FFFFF del YMF278; encima
+     * de 0x400000 en espacio YMF278 leemos 0xFF).
+     ***************************************************************/
+    localparam [23:0]   RAM_ADDR_YRW801         = 24'h80_0000;
+    localparam [23:0]   RAM_SIZE_YRW801         = 24'h20_0000;  // 2 MiB
+    localparam [23:0]   RAM_ADDR_WAVE_SRAM      = 24'hA0_0000;
+    localparam [23:0]   RAM_SIZE_WAVE_SRAM      = 24'h20_0000;  // 2 MiB
+
+    /***************************************************************
+     * MangOPL4 Fase 2 — flash externa W25Q64: YRW801 a 0x40_0000
+     * (tras la región reservada para MEGAROM 0x20_0000-0x40_0000).
+     * Antes de eso hay zona BIOS (Nextor+FM 0x10_0000-0x12_4000) y
+     * PAC (0x1F_0000) — sin hueco contiguo de 2 MB.
+     ***************************************************************/
+    localparam [23:0]   FLASH_ADDR_YRW801       = 24'h40_0000;
+    localparam [23:0]   FLASH_SIZE_YRW801       = 24'h20_0000;  // 2 MiB
+
+    /***************************************************************
      * アッテネータ
      ***************************************************************/
     // 3.5mm ジャック

@@ -40,7 +40,12 @@ module ymf278_top
 
     // Salida audio: signed 24-bit (mismo width que DAC OPL3) para sumar
     // directamente con mono_q antes del gain stage en cartridge_opl3.sv.
-    output logic signed [23:0]  wave_sample
+    output logic signed [23:0]  wave_sample,
+
+    // MangOPL4 Fase 2 — SDRAM Wave (YRW801 + Sample RAM). En 2a.x no
+    // se usa, las señales se driven a idle. En 2b.2 lo usa el memory
+    // port. En 2b.3 lo usa el sample fetch del playback.
+    RAM_IF.HOST                 Ram
 );
 
     /***************************************************************
@@ -154,6 +159,20 @@ module ymf278_top
 
     // Sign-extend a 24-bit para sumar con mono_q en cartridge_opl3.sv
     assign wave_sample = {{8{wave16[15]}}, wave16};
+
+    /***************************************************************
+     * MangOPL4 Fase 2.1 — RAM_IF idle. Hasta 2b.2 (memory port) no
+     * usamos SDRAM. Drive defaults seguros para que el OR-collapse
+     * arbiter en EXPANSION_RAM no nos vea (OE_n/WE_n/RFSH_n a 1).
+     ***************************************************************/
+    always_comb begin
+        Ram.ADDR     = 24'h0;
+        Ram.DIN      = 32'h0;
+        Ram.DIN_SIZE = 3'b000;
+        Ram.OE_n     = 1'b1;
+        Ram.WE_n     = 1'b1;
+        Ram.RFSH_n   = 1'b1;
+    end
 
 endmodule
 
