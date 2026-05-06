@@ -25,27 +25,32 @@ module CARTRIDGE_OPL3 (
 );
 
     /***************************************************************
-     * Bus.INT_n: IRQ del core OPL3 hacia el MSX, en modo PULSO corto.
+     * Bus.INT_n: IRQ del core OPL3 hacia el MSX, en modo PULSO+GAP+REPEAT.
      *
-     * Razón: VGMPlay-MSX hace OPLTimer_Detect que arranca Timer1
-     * antes de instalar su propio IRQ handler. Si en ese momento
-     * tenemos INT_n asserted de forma sostenida, Z80 entra en BIOS
-     * ISR (JP 0x38) que no limpia ft1 del OPL3 → tormenta IRQ →
-     * cuelgue. Asserting INT_n como un pulso corto (~10 µs) en cada
-     * flanco ascendente de IRQ del core hace que:
-     *   - Z80 captura UN IRQ y va a BIOS handler
-     *   - Pulso expira antes de que BIOS handler retorne
-     *   - Tras RETI, INT_n alto, no re-IRQ
-     *   - Detection completa OK; status read sigue mostrando ft1=1
-     * Cuando VGMPlay luego instala su handler propio y arranca
-     * Timer1 a 1130 Hz, cada overflow genera un nuevo pulso → IRQ →
-     * handler limpia ft1 → siguiente overflow ya no se solapa.
+     * Razón: VGMPlay-MSX hace OPLTimer_Detect que arranca Timer1 antes
+     * de instalar su propio IRQ handler. Si en ese momento tenemos
+     * INT_n asserted de forma sostenida, Z80 entra en BIOS ISR (JP 0x38)
+     * que no limpia ft1 del OPL3 → tormenta IRQ → cuelgue.
+     *
+     * Tu pista (re: 2º run sin sonido) reveló también que un único pulso
+     * por flanco no funciona: si Z80 pierde 1 IRQ (en sección DI), el
+     * detector de flanco no vuelve a disparar (irq_active queda en 1
+     * sin transición). Recovery imposible.
+     *
+     * Solución: máquina pulso+gap+repeat:
+     *   - PULSE 5 µs (INT_n=0): suficiente para que Z80 capture IRQ
+     *   - GAP 50 µs (INT_n=1): > BIOS handler (~50 µs), permite RETI
+     *     antes del próximo pulso (no causa storm en detección)
+     *   - Toggle continuo PULSE↔GAP mientras irq_active=1
+     *   - Reset máquina cuando irq_active=0 (handler limpió ft1)
+     * Esto recupera de IRQs perdidos: el siguiente pulso a 55 µs es
+     * nueva oportunidad de captura.
      ***************************************************************/
     assign Bus.WAIT_n = 1;
     wire opl3_irq_n_raw;
 
     // Settle counter — evita glitches power-on antes de empezar a
-    // mirar irq_n_raw (mismo motivo que antes: Gowin no honra init).
+    // mirar irq_n_raw (Gowin no honra init en output ports).
     logic [4:0] settle_count = 0;
     always_ff @(posedge CLK_OPL3 or negedge RESET_n) begin
         if (!RESET_n)                       settle_count <= 5'd0;
@@ -54,42 +59,58 @@ module CARTRIDGE_OPL3 (
     end
     wire armed = (settle_count == 5'h1F);
 
-    // Generador de IRQ con pulso + gap + repeat:
-    //   - Mientras irq_active=1 (ft1=1 en el core), genera pulsos
-    //     periódicos de PULSE µs separados por GAP µs.
-    //   - Si software limpia ft1 (irq_active=0), reseteo todo.
-    // PULSE 5 µs: corto para no causar re-IRQ tras BIOS handler RETI.
-    // GAP 50 µs: > BIOS handler (~50 µs), permite RETI antes del próximo.
-    // Esto recupera de IRQs perdidos por DI: el siguiente pulso se
-    // dispara aunque el flanco original ya pasase.
     wire  irq_active = !opl3_irq_n_raw;
-    localparam PULSE_CYCLES = 11'd168;   // 5 µs
-    localparam GAP_CYCLES   = 11'd1678;  // 50 µs
+    localparam PULSE_CYCLES = 11'd168;   // 5 µs a 33.5625 MHz
+    localparam GAP_CYCLES   = 11'd1678;  // 50 µs a 33.5625 MHz
+    localparam MAX_PULSES   = 6'd32;     // tras 32 pulsos sin ack, dar por
+                                          // perdido y holdear INT_n alto.
+                                          // Evita storm cuando software no
+                                          // limpia ft1 (ej: tras exit de
+                                          // VGMPlay).
     logic [10:0] state_count;
-    logic        in_pulse;   // 1 = pulse phase (INT_n bajo), 0 = gap phase
+    logic        in_pulse;   // 1 = INT_n bajo, 0 = INT_n alto (gap)
+    logic [5:0]  miss_count; // pulsos consecutivos sin ack
+    logic        gave_up;    // 1 = dejé de pulsar hasta que irq_active=0
     always_ff @(posedge CLK_OPL3 or negedge RESET_n) begin
         if (!RESET_n) begin
             state_count <= 11'd0;
             in_pulse    <= 1'b0;
+            miss_count  <= 6'd0;
+            gave_up     <= 1'b0;
         end
         else if (!Bus.RESET_n) begin
             state_count <= 11'd0;
             in_pulse    <= 1'b0;
+            miss_count  <= 6'd0;
+            gave_up     <= 1'b0;
         end
         else if (!armed || !irq_active) begin
-            // No IRQ pendiente o aún en settle. Reset máquina.
+            // Software reconoció IRQ (o no hay IRQ pendiente). Reset todo.
+            state_count <= 11'd0;
+            in_pulse    <= 1'b0;
+            miss_count  <= 6'd0;
+            gave_up     <= 1'b0;
+        end
+        else if (gave_up) begin
+            // Rendido. Mantener INT_n alto hasta próximo evento de ack.
             state_count <= 11'd0;
             in_pulse    <= 1'b0;
         end
         else if (state_count == 11'd0) begin
-            // Fin de fase actual. Toggle pulse/gap.
             if (in_pulse) begin
                 state_count <= GAP_CYCLES - 11'd1;
                 in_pulse    <= 1'b0;
             end
             else begin
-                state_count <= PULSE_CYCLES - 11'd1;
-                in_pulse    <= 1'b1;
+                if (miss_count == MAX_PULSES) begin
+                    gave_up    <= 1'b1;
+                    in_pulse   <= 1'b0;
+                end
+                else begin
+                    state_count <= PULSE_CYCLES - 11'd1;
+                    in_pulse    <= 1'b1;
+                    miss_count  <= miss_count + 6'd1;
+                end
             end
         end
         else begin
