@@ -37,7 +37,14 @@
  * RAM カードリッジ
  ***************************************************************/
 module CARTRIDGE_RAM #(
-    parameter [23:0]        RAM_ADDR = 0
+    parameter [23:0]        RAM_ADDR = 0,
+    // MangOPL4: máscara para limitar el bank register al tamaño real
+    // de SDRAM asignado al memory mapper. Por defecto 0xFF = 4 MB
+    // (256 banks × 16 KB). Para 1 MB (64 banks) usar 0x3F.
+    // El MSX usa esto para detectar el tamaño del mapper escribiendo
+    // valores y leyéndolos: bits enmascarados se leen como 0 → mapper
+    // detectado más pequeño.
+    parameter [7:0]         BANK_MASK = 8'hFF
 ) (
     input   wire            RESET_n,
     input   wire            CLK,
@@ -70,7 +77,9 @@ module CARTRIDGE_RAM #(
             bank[3] <= 0;
         end
         else if(det_io_wr && Bus.ADDR[7:2] == IO_BASE_ADDR[7:2]) begin
-            bank[Bus.ADDR[1:0]] <= Bus.DIN;
+            // MangOPL4: máscara aplicada al write para que el detector
+            // del MSX vea solo los bits válidos del tamaño actual.
+            bank[Bus.ADDR[1:0]] <= Bus.DIN & BANK_MASK;
         end
     end
 

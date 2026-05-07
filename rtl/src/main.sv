@@ -232,7 +232,8 @@ module MAIN #(
      ***************************************************************/
     if(CONFIG::ENABLE_RAM) begin
         CARTRIDGE_RAM #(
-            .RAM_ADDR       (CONFIG::RAM_ADDR_RAM)
+            .RAM_ADDR       (CONFIG::RAM_ADDR_RAM),
+            .BANK_MASK      (CONFIG::RAM_BANK_MASK_1MB)  // MangOPL4: 1 MB mapper
         ) u_ram (
             .RESET_n        (SYS_RESET_n),
             .CLK,

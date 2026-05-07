@@ -47,7 +47,7 @@ module CARTRIDGE_OPL3 (
      * Esto recupera de IRQs perdidos: el siguiente pulso a 55 µs es
      * nueva oportunidad de captura.
      ***************************************************************/
-    assign Bus.WAIT_n = 1;
+    assign Bus.WAIT_n = 1'b1;
     wire opl3_irq_n_raw;
 
     // Settle counter — evita glitches power-on antes de empezar a
@@ -163,6 +163,18 @@ module CARTRIDGE_OPL3 (
         else                          prev_wave_wr_active <= wave_wr_active;
     end
 
+    // Edge detection del FIN de un read del data port (7F): flanco
+    // DESCENDENTE de (cs_wave && !Bus.RD_n && Bus.ADDR[0]=1). Usado
+    // por ymf278_mempointer para auto-incrementar el pointer y
+    // disparar prefetch del nuevo byte tras un IN A,(7F).
+    logic prev_wave_rd_data_active = 0;
+    wire  wave_rd_data_active   = rd_wave_data;
+    wire  wave_rd_done_strobe   = !wave_rd_data_active && prev_wave_rd_data_active;
+    always_ff @(posedge CLK or negedge RESET_n) begin
+        if (!RESET_n || !Bus.RESET_n) prev_wave_rd_data_active <= 1'b0;
+        else                          prev_wave_rd_data_active <= wave_rd_data_active;
+    end
+
     /***************************************************************
      * Shadow register file — emula la legibilidad de registros
      * OPL3 que tiene el YMF278B real (verificado en openMSX
@@ -234,11 +246,13 @@ module CARTRIDGE_OPL3 (
         .bus_reset_n    (Bus.RESET_n),
         .new2           (shadow_b1[8'h05][1]),  // bit 1 = NEW2 (verificado en openMSX YMF278B.cc:203)
         .wr_strobe      (wave_wr_strobe),
+        .rd_done_strobe (wave_rd_done_strobe),
+        .bus_merq_n     (Bus.MERQ_n),            // Gate SDRAM access cuando Z80 en M-cycle
         .addr0          (Bus.ADDR[0]),
         .din            (Bus.DIN),
         .rd_data        (wave_rd_data),
         .wave_sample    (wave_sample),
-        .Ram            (Ram)                    // SDRAM Wave (sin uso en 2a; usado en 2b+)
+        .Ram            (Ram)                    // SDRAM Wave
     );
 
     // YMF278B drivea bus en cualquier read C4-C7 + 7F (7E flota)

@@ -35,6 +35,14 @@ module ymf278_top
     input  wire                 addr0,          // 0=7E (reg select), 1=7F (data)
     input  wire [7:0]           din,            // Bus.DIN
 
+    // Strobe de read terminado en 7F (flanco descendente IORQ_n=0 &&
+    // RD_n=0 && ADDR[0]=1) — usado por mempointer para auto-incrementar
+    // el pointer tras una lectura del data port (reg 06).
+    input  wire                 rd_done_strobe,
+
+    // Bus.MERQ_n del Z80 (gate del acceso SDRAM en mempointer):
+    input  wire                 bus_merq_n,
+
     // Read-back para 7F:
     output logic [7:0]          rd_data,
 
@@ -42,9 +50,9 @@ module ymf278_top
     // directamente con mono_q antes del gain stage en cartridge_opl3.sv.
     output logic signed [23:0]  wave_sample,
 
-    // MangOPL4 Fase 2 — SDRAM Wave (YRW801 + Sample RAM). En 2a.x no
-    // se usa, las señales se driven a idle. En 2b.2 lo usa el memory
-    // port. En 2b.3 lo usa el sample fetch del playback.
+    // MangOPL4 Fase 2 — SDRAM Wave (YRW801 + Sample RAM). 2b.2 lo usa
+    // el memory port, 2b.3 lo compartirá con el sample fetch del
+    // playback (mempointer prioridad cuando MSX está accediendo).
     RAM_IF.HOST                 Ram
 );
 
@@ -77,8 +85,32 @@ module ymf278_top
         .regs           (regs)
     );
 
-    // Read-back stub: 0x20 (preserva detección MoonSound de VGMPlay)
-    assign rd_data = 8'h20;
+    /***************************************************************
+     * Memory port (regs 02-06): pointer 24-bit + R/W vía SDRAM
+     ***************************************************************/
+    logic [7:0] mem_data_byte;
+    ymf278_mempointer u_mempointer (
+        .RESET_n            (RESET_n),
+        .CLK                (CLK),
+        .bus_reset_n        (bus_reset_n),
+        .reg_wr_stb         (reg_wr_stb),
+        .reg_addr           (reg_addr_latch),
+        .reg_data           (din),
+        .reg_rd_done_stb    (rd_done_strobe),
+        .bus_merq_n         (bus_merq_n),
+        .mem_data_byte      (mem_data_byte),
+        .Ram                (Ram)
+    );
+
+    // Read-back: si reg seleccionado = 0x06, devolver byte de memoria;
+    // en cualquier otro caso 0x20 (stub que preserva detección
+    // MoonSound de VGMPlay).
+    always_comb begin
+        case (reg_addr_latch)
+            8'h06:    rd_data = mem_data_byte;
+            default:  rd_data = 8'h20;
+        endcase
+    end
 
     /***************************************************************
      * Key-on de slot 0: bit 7 del registro 0x68 (slot=0, offset=4)
@@ -160,19 +192,7 @@ module ymf278_top
     // Sign-extend a 24-bit para sumar con mono_q en cartridge_opl3.sv
     assign wave_sample = {{8{wave16[15]}}, wave16};
 
-    /***************************************************************
-     * MangOPL4 Fase 2.1 — RAM_IF idle. Hasta 2b.2 (memory port) no
-     * usamos SDRAM. Drive defaults seguros para que el OR-collapse
-     * arbiter en EXPANSION_RAM no nos vea (OE_n/WE_n/RFSH_n a 1).
-     ***************************************************************/
-    always_comb begin
-        Ram.ADDR     = 24'h0;
-        Ram.DIN      = 32'h0;
-        Ram.DIN_SIZE = 3'b000;
-        Ram.OE_n     = 1'b1;
-        Ram.WE_n     = 1'b1;
-        Ram.RFSH_n   = 1'b1;
-    end
+    // (RAM_IF lo drivea ymf278_mempointer arriba — ya no idle aquí)
 
 endmodule
 
