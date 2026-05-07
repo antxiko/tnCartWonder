@@ -102,6 +102,12 @@ module BOOTLOADER #(
     parameter               XFER_SIZE = 32768,
     parameter               XFER_SRC_ADDR = 24'h10_0000,
 
+    // MangOPL4 Fase 2b.4: segunda transferencia FLASH→RAM para YRW801.
+    // Si YRW801_SIZE == 0 se omite (compatibilidad con builds sin Wave).
+    parameter [23:0]        YRW801_DST_ADDR = 0,
+    parameter [23:0]        YRW801_SRC_ADDR = 0,
+    parameter [23:0]        YRW801_SIZE = 0,
+
     // ClearMegarom が 1 の時にクリアする領域
     parameter               MEGAROM_CLEAR_ADDR = 0,
     parameter               MEGAROM_CLEAR_SIZE = 32768,
@@ -192,6 +198,7 @@ module BOOTLOADER #(
         STATE_WAIT_BOOT,
 
         STATE_LOAD_BIOS,
+        STATE_LOAD_YRW801,
 
         STATE_CLEAR_MEGAROM,
 
@@ -274,7 +281,7 @@ module BOOTLOADER #(
                 end
 
                 //------------------------------
-                // LOAD BIOS IMAGE 
+                // LOAD BIOS IMAGE
                 //------------------------------
                 STATE_LOAD_BIOS:
                 begin
@@ -283,11 +290,27 @@ module BOOTLOADER #(
                     XferPrim.Size <= XFER_SIZE;
                     XferPrim.Mode <= XFER::XFER_MODE_FLASH_TO_RAM;
                     XferPrim.Start <= 1;
+                    state <= STATE_LOAD_YRW801;
+                end
+
+                //------------------------------
+                // LOAD YRW801 (MangOPL4 Fase 2b.4)
+                // Si YRW801_SIZE == 0 → skip a CLEAR_MEGAROM.
+                //------------------------------
+                STATE_LOAD_YRW801:
+                begin
+                    if (YRW801_SIZE != 0) begin
+                        XferPrim.RamAddress <= YRW801_DST_ADDR;
+                        XferPrim.FlashAddress <= YRW801_SRC_ADDR;
+                        XferPrim.Size <= YRW801_SIZE;
+                        XferPrim.Mode <= XFER::XFER_MODE_FLASH_TO_RAM;
+                        XferPrim.Start <= 1;
+                    end
                     state <= STATE_CLEAR_MEGAROM;
                 end
 
                 //------------------------------
-                // CLEAR MEGAROM 
+                // CLEAR MEGAROM
                 //------------------------------
                 STATE_CLEAR_MEGAROM:
                 begin

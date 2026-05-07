@@ -63,6 +63,10 @@ package CONFIG;
      *  20_0000 +-------------------+
      *          | MEGA ROM (2MB)    | (FLASHからMEGAROMをブートするときに使う予定)
      *  40_0000 +-------------------+
+     *          | YRW801 (2MB)      | MangOPL4 Fase 2b.4 — copiada a SDRAM al boot
+     *  60_0000 +-------------------+
+     *          | (free 2 MB)       |
+     *  80_0000 +-------------------+ (8 MB total)
      ***************************************************************/
     localparam [23:0]   FLASH_ADDR_MEGAROM      = 24'h20_0000;
     localparam [23:0]   FLASH_SIZE_MEGAROM      = 24'h20_0000;
@@ -72,6 +76,8 @@ package CONFIG;
     localparam [23:0]   FLASH_SIZE_BIOS_FM      = 24'h00_4000;
     localparam [23:0]   FLASH_ADDR_PAC          = 24'h1F_0000;
     localparam [23:0]   FLASH_SIZE_PAC          = 24'h01_0000;
+    localparam [23:0]   FLASH_ADDR_YRW801       = 24'h40_0000;
+    localparam [23:0]   FLASH_SIZE_YRW801       = 24'h20_0000;  // 2 MB
 
     /***************************************************************
      * SD-RAM メモリマップ
