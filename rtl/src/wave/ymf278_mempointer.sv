@@ -50,8 +50,20 @@ module ymf278_mempointer
     // diferimos el acceso hasta el próximo OUT/IO cycle.
     input  wire             bus_merq_n,
 
+    // 2b.3 Playback: bit 7 del registro 0x68 = key-on de slot 0.
+    // Cuando vale 1, mempointer hace fetch continuo de bytes desde
+    // SDRAM 0x300000 + sample_index (hardcoded ymf278 0x200000)
+    // a sample rate ~44 kHz. Cuando vale 0, playback_sample = 0.
+    input  wire             key_on_slot0,
+
     // Byte actualmente disponible para read en 7F (si reg_addr=0x06):
     output logic [7:0]      mem_data_byte,
+
+    // 2b.3 Playback sample, signed 16-bit. Conversión 8-bit unsigned
+    // a 16-bit signed: byte 0x80 → 0, byte 0x00 → -32768, byte 0xFF
+    // → +32512. ymf278_top lo registra en CLK_OPL3 y sign-extiende
+    // a 24-bit para sumar con el FM averaged.
+    output logic signed [15:0] playback_sample,
 
     // RAM_IF.HOST: maestro del bus SDRAM.
     RAM_IF.HOST             Ram
@@ -68,7 +80,32 @@ module ymf278_mempointer
     logic        pending_write;
     logic [7:0]  pending_write_data;
 
-    // Estado del state machine SDRAM
+    // 2b.3 Playback (versión sin SDRAM fetch — cache local).
+    //
+    // RAZÓN: el SDRAM controller no tiene arbitración. ACK_n se
+    // broadcast a TODOS los hosts → cartridge_ram (memory mapper,
+    // accedido continuamente por Z80) ve nuestro ACK y lee nuestro
+    // DOUT como instrucción → MSX cuelga.
+    //
+    // Workaround: cache de 256 bytes en FFs. Memory port writes
+    // a la región [0x200000, 0x2000FF] del YMF278 actualizan el
+    // cache Y la SDRAM (paralelo). Playback lee SOLO del cache,
+    // sin tocar SDRAM. Cero contención.
+    //
+    // Limitación: cache es solo 256 bytes (suficiente para 2b.3
+    // smoke test). Para Sample RAM completo (1 MB+) en 2c+ habrá
+    // que añadir arbitración real al SDRAM controller.
+    logic [7:0]  sample_cache [0:255];
+    logic [7:0]  sample_index;        // 0-255 (mod 256)
+    logic        prev_key_on;         // edge detect para reset al key-on
+
+    // Sample tick: ~44 kHz desde CLK (107.4 MHz / 2435).
+    localparam int TICK_DIV = 2435;
+    logic [11:0] tick_counter;
+    logic        fetch_tick;
+
+    // Estado del FSM SDRAM (sin estados de playback fetch — ya no
+    // accedemos SDRAM para playback).
     typedef enum logic [2:0] {
         S_IDLE,
         S_READ_REQ,
@@ -97,6 +134,9 @@ module ymf278_mempointer
     wire [23:0] sdram_addr = ymf278_in_sram_ext ? (24'h40_0000 + pointer)
                                                 : (24'h10_0000 + pointer);
 
+    // (Playback ya NO usa SDRAM, solo el cache local sample_cache.
+    //  La traducción ymf278 → SDRAM solo se usa para memory port.)
+
     /***************************************************************
      * Bloque único que maneja: pointer, fetched_byte, pending flags,
      * state machine FSM, y RAM_IF outputs.
@@ -115,6 +155,11 @@ module ymf278_mempointer
             Ram.OE_n           <= 1'b1;
             Ram.WE_n           <= 1'b1;
             Ram.RFSH_n         <= 1'b1;
+            // 2b.3 playback state (cache-based, no SDRAM fetch)
+            sample_index       <= 8'h0;
+            prev_key_on        <= 1'b0;
+            tick_counter       <= 12'h0;
+            fetch_tick         <= 1'b0;
         end
         else begin
             // Defaults RAM_IF cada ciclo. CRÍTICO clarear ADDR/DIN/
@@ -133,20 +178,36 @@ module ymf278_mempointer
             Ram.RFSH_n   <= 1'b1;
 
             // ============ Eventos del bus ============
-            // Cambios al pointer (regs 03/04/05): solo actualizan
-            // los bytes correspondientes. NO disparan prefetch — eso
-            // se hace solo al hacer SELECT de reg 06 (más abajo) o
-            // al consumir un byte vía IN de reg 06. Esto minimiza
-            // el número de accesos SDRAM (cada acceso es ventana
-            // potencial de contention con cartridge_ram).
+            // Cambios al pointer (regs 03/04/05): actualizan los bytes
+            // y disparan prefetch. Sin prefetch, el primer IN tras
+            // setup de pointer devuelve fetched_byte stale (el byte
+            // de la posición anterior) — esto rompe la detección de
+            // RAM de MoonBlaster Wave que escribe byte X, lee back, y
+            // espera X. Ahora con ADDR=0 default y TIMING gate, los
+            // accesos SDRAM por prefetch son seguros (no contention).
             if (reg_wr_stb) begin
                 case (reg_addr)
-                    8'h03: pointer[23:16] <= reg_data;
-                    8'h04: pointer[15:8]  <= reg_data;
-                    8'h05: pointer[7:0]   <= reg_data;
+                    8'h03: begin
+                        pointer[23:16] <= reg_data;
+                        pending_read   <= 1'b1;
+                    end
+                    8'h04: begin
+                        pointer[15:8]  <= reg_data;
+                        pending_read   <= 1'b1;
+                    end
+                    8'h05: begin
+                        pointer[7:0]   <= reg_data;
+                        pending_read   <= 1'b1;
+                    end
                     8'h06: begin
                         pending_write       <= 1'b1;
                         pending_write_data  <= reg_data;
+                        // 2b.3 Cache: si pointer está en la región
+                        // [0x200000, 0x2000FF] (primera página de
+                        // Sample RAM), copiar el byte al cache local.
+                        if (pointer[23:8] == 16'h2000) begin
+                            sample_cache[pointer[7:0]] <= reg_data;
+                        end
                     end
                     default: ; // otros regs no son problema nuestro
                 endcase
@@ -155,6 +216,27 @@ module ymf278_mempointer
             if (reg_rd_done_stb && reg_addr == 8'h06) begin
                 pointer      <= pointer + 24'd1;
                 pending_read <= 1'b1;
+            end
+
+            // ============ 2b.3 Playback tick + key-on edge ============
+            // Sample tick a 44 kHz desde CLK.
+            if (tick_counter == TICK_DIV - 1) begin
+                tick_counter <= 12'h0;
+                fetch_tick   <= 1'b1;
+            end
+            else begin
+                tick_counter <= tick_counter + 12'd1;
+                fetch_tick   <= 1'b0;
+            end
+
+            // Edge detect del key_on: al subir (0→1), reset sample_index.
+            prev_key_on <= key_on_slot0;
+            if (key_on_slot0 && !prev_key_on) begin
+                sample_index <= 8'h0;
+            end
+            // Cuando hay sample tick y key_on activo, avanza el index.
+            else if (fetch_tick && key_on_slot0) begin
+                sample_index <= sample_index + 8'd1;  // wraps mod 256
             end
 
             // ============ FSM SDRAM ============
@@ -265,6 +347,13 @@ module ymf278_mempointer
     end
 
     assign mem_data_byte = fetched_byte;
+
+    // 2b.3 Playback output: lee del cache local (sin SDRAM access),
+    // convierte 8-bit unsigned a 16-bit signed.
+    // byte 0x80 → 0, byte 0x00 → -32768, byte 0xFF → +32512.
+    wire [7:0] cache_byte = sample_cache[sample_index];
+    assign playback_sample = key_on_slot0 ? signed'({cache_byte ^ 8'h80, 8'h00})
+                                          : 16'sh0000;
 
 endmodule
 

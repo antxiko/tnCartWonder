@@ -86,9 +86,13 @@ module ymf278_top
     );
 
     /***************************************************************
-     * Memory port (regs 02-06): pointer 24-bit + R/W vía SDRAM
+     * Memory port (regs 02-06): pointer 24-bit + R/W vía SDRAM.
+     * También maneja el playback fetch de Sub-fase 2b.3 (key-on
+     * en slot 0 dispara fetch continuo de Sample RAM a 44 kHz).
      ***************************************************************/
-    logic [7:0] mem_data_byte;
+    logic [7:0]               mem_data_byte;
+    logic signed [15:0]       playback_sample_clk;
+    wire                      keyon_slot0_clk = regs[8'h68][7];
     ymf278_mempointer u_mempointer (
         .RESET_n            (RESET_n),
         .CLK                (CLK),
@@ -98,7 +102,9 @@ module ymf278_top
         .reg_data           (din),
         .reg_rd_done_stb    (rd_done_strobe),
         .bus_merq_n         (bus_merq_n),
+        .key_on_slot0       (keyon_slot0_clk),
         .mem_data_byte      (mem_data_byte),
+        .playback_sample    (playback_sample_clk),
         .Ram                (Ram)
     );
 
@@ -113,84 +119,25 @@ module ymf278_top
     end
 
     /***************************************************************
-     * Key-on de slot 0: bit 7 del registro 0x68 (slot=0, offset=4)
-     * Sync 2-FF de CLK → CLK_OPL3.
-     ***************************************************************/
-    wire keyon_slot0_clk = regs[8'h68][7];
-    logic keyon_s1, keyon_s2;
-    always_ff @(posedge CLK_OPL3 or negedge RESET_n) begin
-        if (!RESET_n) begin
-            keyon_s1 <= 1'b0;
-            keyon_s2 <= 1'b0;
-        end
-        else begin
-            keyon_s1 <= keyon_slot0_clk;
-            keyon_s2 <= keyon_s1;
-        end
-    end
-    wire keyon_sync = keyon_s2;
-
-    /***************************************************************
-     * Sample tick divider: ~44.16 kHz desde CLK_OPL3
-     ***************************************************************/
-    localparam int TICK_BITS = $clog2(SAMPLE_TICK_DIV);
-    logic [TICK_BITS-1:0] tick_counter;
-    logic                  sample_tick;
-    always_ff @(posedge CLK_OPL3 or negedge RESET_n) begin
-        if (!RESET_n) begin
-            tick_counter <= '0;
-            sample_tick  <= 1'b0;
-        end
-        else if (tick_counter == TICK_BITS'(SAMPLE_TICK_DIV - 1)) begin
-            tick_counter <= '0;
-            sample_tick  <= 1'b1;
-        end
-        else begin
-            tick_counter <= tick_counter + 1'b1;
-            sample_tick  <= 1'b0;
-        end
-    end
-
-    /***************************************************************
-     * Phase accumulator (1 voz, paso fijo) + square wave
+     * 2b.3 Playback output: registramos playback_sample_clk en
+     * CLK_OPL3 con un FF (single, suficiente porque el signal cambia
+     * a sample rate 44 kHz, mucho más lento que CLK_OPL3 = 33.5 MHz).
+     * Luego sign-extiende a 24-bit para el mixer.
      *
-     * Paso fijo elegido para tono audible ~1.7 kHz a sample rate
-     * 44.16 kHz: step = 2^32 * 1700 / 44160 ≈ 0x0270_0000.
-     * El bit 31 de phase es el signo de la onda cuadrada.
+     * El square wave de 2a se ha eliminado — playback toma su lugar.
      ***************************************************************/
-    localparam logic [PHASE_WIDTH-1:0] FIXED_STEP = 32'h0270_0000;
-    localparam logic signed [15:0]    SQUARE_HI  = 16'sh4000;   //  +16384
-    localparam logic signed [15:0]    SQUARE_LO  = -16'sh4000;  //  −16384
-
-    logic [PHASE_WIDTH-1:0] phase;
+    logic signed [15:0] playback_sample_clkopl3;
     always_ff @(posedge CLK_OPL3 or negedge RESET_n) begin
         if (!RESET_n || !bus_reset_n) begin
-            phase <= '0;
-        end
-        else if (!keyon_sync) begin
-            // Key-off: reset phase a 0 para evitar click al re-key-on
-            phase <= '0;
-        end
-        else if (sample_tick) begin
-            phase <= phase + FIXED_STEP;
-        end
-    end
-
-    logic signed [15:0] wave16;
-    always_ff @(posedge CLK_OPL3 or negedge RESET_n) begin
-        if (!RESET_n || !bus_reset_n) begin
-            wave16 <= 16'sh0000;
-        end
-        else if (!keyon_sync) begin
-            wave16 <= 16'sh0000;
+            playback_sample_clkopl3 <= 16'sh0000;
         end
         else begin
-            wave16 <= phase[PHASE_WIDTH-1] ? SQUARE_LO : SQUARE_HI;
+            playback_sample_clkopl3 <= playback_sample_clk;
         end
     end
 
     // Sign-extend a 24-bit para sumar con mono_q en cartridge_opl3.sv
-    assign wave_sample = {{8{wave16[15]}}, wave16};
+    assign wave_sample = {{8{playback_sample_clkopl3[15]}}, playback_sample_clkopl3};
 
     // (RAM_IF lo drivea ymf278_mempointer arriba — ya no idle aquí)
 
