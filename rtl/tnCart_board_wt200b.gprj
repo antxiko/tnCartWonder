@@ -103,6 +103,8 @@
         <File path="src/wave/ymf278_regfile.sv" type="file.verilog" enable="1"/>
         <File path="src/wave/ymf278_mempointer.sv" type="file.verilog" enable="1"/>
         <File path="src/wave/ymf278_phase.sv" type="file.verilog" enable="1"/>
+        <File path="src/wave/ymf278_interp.sv" type="file.verilog" enable="1"/>
+        <File path="src/wave/ymf278_fetch1.sv" type="file.verilog" enable="1"/>
         <File path="src/wave/ymf278_top.sv" type="file.verilog" enable="1"/>
         <File path="src/cartridge_opl3.sv" type="file.verilog" enable="1"/>
         <File path="../../opl3_fpga/fpga/modules/top_level/src/opl3.sv" type="file.verilog" enable="1"/>
