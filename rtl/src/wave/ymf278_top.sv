@@ -146,12 +146,20 @@ module ymf278_top
         end
     end
 
+    // 2c.2.c: extraer FNUM y OCTAVE del regfile, slot 0.
+    // Mapping bit-exact YMF278B (verificado contra openMSX YMF278.cc):
+    //   reg 0x20+slot: bits[7:1] → FN[6:0], bit[0] → wave[8].
+    //   reg 0x38+slot: bits[2:0] → FN[9:7], bit[3] → PRVB,
+    //                  bits[7:4] → OCT (4-bit signed).
+    wire [9:0]        fn_slot0  = {regs[8'h38][2:0], regs[8'h20][7:1]};
+    wire signed [3:0] oct_slot0 = regs[8'h38][7:4];
+
     logic [31:0] phase_acc_clk;
     ymf278_phase u_phase (
         .RESET_n        (RESET_n),
         .CLK            (CLK),
-        .fnum           (10'd0),
-        .octave         (4'sd0),
+        .fnum           (fn_slot0),
+        .octave         (oct_slot0),
         .key_on         (keyon_slot0_clk),
         .sample_clk_en  (sample_tick_top),
         .phase_acc      (phase_acc_clk)
