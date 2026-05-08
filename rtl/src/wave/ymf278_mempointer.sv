@@ -51,10 +51,15 @@ module ymf278_mempointer
     input  wire             bus_merq_n,
 
     // 2b.3 Playback: bit 7 del registro 0x68 = key-on de slot 0.
-    // Cuando vale 1, mempointer hace fetch continuo de bytes desde
-    // SDRAM 0x300000 + sample_index (hardcoded ymf278 0x200000)
-    // a sample rate ~44 kHz. Cuando vale 0, playback_sample = 0.
+    // Cuando vale 1, playback_sample = sample_cache[cache_index] convertido
+    // a signed 16-bit. Cuando vale 0, playback_sample = 0.
     input  wire             key_on_slot0,
+
+    // 2c.2.d: índice del cache, externo. En sub-pasos previos era un
+    // counter interno +1 a 44 kHz; ahora viene del phase generator
+    // (phase_acc[bits altos]) en ymf278_top, con pitch controlable
+    // por FNUM/OCTAVE del slot 0.
+    input  wire [7:0]       cache_index,
 
     // Byte actualmente disponible para read en 7F (si reg_addr=0x06):
     output logic [7:0]      mem_data_byte,
@@ -95,14 +100,11 @@ module ymf278_mempointer
     // Limitación: cache es solo 256 bytes (suficiente para 2b.3
     // smoke test). Para Sample RAM completo (1 MB+) en 2c+ habrá
     // que añadir arbitración real al SDRAM controller.
+    //
+    // 2c.2.d: el índice del cache ahora es cache_index (input externo
+    // desde phase_acc del slot 0). Eliminada la lógica del counter
+    // interno (sample_index, tick_counter, fetch_tick, prev_key_on).
     logic [7:0]  sample_cache [0:255];
-    logic [7:0]  sample_index;        // 0-255 (mod 256)
-    logic        prev_key_on;         // edge detect para reset al key-on
-
-    // Sample tick: ~44 kHz desde CLK (107.4 MHz / 2435).
-    localparam int TICK_DIV = 2435;
-    logic [11:0] tick_counter;
-    logic        fetch_tick;
 
     // Estado del FSM SDRAM (sin estados de playback fetch — ya no
     // accedemos SDRAM para playback).
@@ -155,11 +157,8 @@ module ymf278_mempointer
             Ram.OE_n           <= 1'b1;
             Ram.WE_n           <= 1'b1;
             Ram.RFSH_n         <= 1'b1;
-            // 2b.3 playback state (cache-based, no SDRAM fetch)
-            sample_index       <= 8'h0;
-            prev_key_on        <= 1'b0;
-            tick_counter       <= 12'h0;
-            fetch_tick         <= 1'b0;
+            // 2c.2.d: cache_index ahora es input externo desde phase_acc;
+            // ya no hay sample_index/tick_counter/prev_key_on internos.
         end
         else begin
             // Defaults RAM_IF cada ciclo. CRÍTICO clarear ADDR/DIN/
@@ -216,27 +215,6 @@ module ymf278_mempointer
             if (reg_rd_done_stb && reg_addr == 8'h06) begin
                 pointer      <= pointer + 24'd1;
                 pending_read <= 1'b1;
-            end
-
-            // ============ 2b.3 Playback tick + key-on edge ============
-            // Sample tick a 44 kHz desde CLK.
-            if (tick_counter == TICK_DIV - 1) begin
-                tick_counter <= 12'h0;
-                fetch_tick   <= 1'b1;
-            end
-            else begin
-                tick_counter <= tick_counter + 12'd1;
-                fetch_tick   <= 1'b0;
-            end
-
-            // Edge detect del key_on: al subir (0→1), reset sample_index.
-            prev_key_on <= key_on_slot0;
-            if (key_on_slot0 && !prev_key_on) begin
-                sample_index <= 8'h0;
-            end
-            // Cuando hay sample tick y key_on activo, avanza el index.
-            else if (fetch_tick && key_on_slot0) begin
-                sample_index <= sample_index + 8'd1;  // wraps mod 256
             end
 
             // ============ FSM SDRAM ============
@@ -351,7 +329,7 @@ module ymf278_mempointer
     // 2b.3 Playback output: lee del cache local (sin SDRAM access),
     // convierte 8-bit unsigned a 16-bit signed.
     // byte 0x80 → 0, byte 0x00 → -32768, byte 0xFF → +32512.
-    wire [7:0] cache_byte = sample_cache[sample_index];
+    wire [7:0] cache_byte = sample_cache[cache_index];
     assign playback_sample = key_on_slot0 ? signed'({cache_byte ^ 8'h80, 8'h00})
                                           : 16'sh0000;
 

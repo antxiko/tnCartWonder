@@ -86,48 +86,25 @@ module ymf278_top
     );
 
     /***************************************************************
-     * Memory port (regs 02-06): pointer 24-bit + R/W vía SDRAM.
-     * También maneja el playback fetch de Sub-fase 2b.3 (key-on
-     * en slot 0 dispara fetch continuo de Sample RAM a 44 kHz).
-     ***************************************************************/
-    logic [7:0]               mem_data_byte;
-    logic signed [15:0]       playback_sample_clk;
-    wire                      keyon_slot0_clk = regs[8'h68][7];
-    ymf278_mempointer u_mempointer (
-        .RESET_n            (RESET_n),
-        .CLK                (CLK),
-        .bus_reset_n        (bus_reset_n),
-        .reg_wr_stb         (reg_wr_stb),
-        .reg_addr           (reg_addr_latch),
-        .reg_data           (din),
-        .reg_rd_done_stb    (rd_done_strobe),
-        .bus_merq_n         (bus_merq_n),
-        .key_on_slot0       (keyon_slot0_clk),
-        .mem_data_byte      (mem_data_byte),
-        .playback_sample    (playback_sample_clk),
-        .Ram                (Ram)
-    );
-
-    /***************************************************************
-     * 2c.2.b: phase generator standalone instanciado.
+     * 2c.2.b/c: phase generator del slot 0.
      *
-     * Inputs hardcoded (fnum=0, octave=0, key_on=key_on_slot0). Output
-     * phase_acc observable desde MSX vía read-back en regs 0xFC-0xFF
+     * Sample tick: divider local en CLK a 44.1 kHz (TICK_DIV=2435).
+     * FNUM/OCT extraídos del regfile bit-exact YMF278B (openMSX):
+     *   reg 0x20+slot: bits[7:1] → FN[6:0], bit[0] → wave[8].
+     *   reg 0x38+slot: bits[2:0] → FN[9:7], bit[3] → PRVB,
+     *                  bits[7:4] → OCT (4-bit signed).
+     *
+     * 2c.2.d: phase_acc_clk[17:10] alimenta el cache_index del
+     * mempointer → pitch del playback ahora controlable por FNUM/OCT.
+     * Con FNUM=0, OCT=0 (defaults post-reset): phase_inc=1024,
+     * phase_acc[17:10] avanza +1 por sample tick → mismo pitch
+     * baseline del counter previo (172 Hz para cache 256 bytes).
+     *
+     * Read-back observable de phase_acc[31:0] en regs 0xFC-0xFF
      * (chip ID range del YMF278B real, no usado por software estándar).
-     *
-     * Sample tick: divider local en CLK a 44.1 kHz (TICK_DIV=2435,
-     * mismo cálculo que el cache local del mempointer).
-     *
-     * NO afecta al audio: phase_acc no entra al path del wave_sample.
-     * El cache local de mempointer sigue conduciendo el playback.
-     *
-     * Test BASIC esperado:
-     *   OUT &H7E,&HFC : INP(&H7F)         → 0 (sin key-on)
-     *   OUT &H7E,&H68 : OUT &H7F,&H80     → key-on slot 0, phase reset
-     *   OUT &H7E,&HFC : INP(&H7F)         → valor pequeño (>0)
-     *   (esperar varios segundos)
-     *   OUT &H7E,&HFD : INP(&H7F)         → byte intermedio creciendo
      ***************************************************************/
+    wire keyon_slot0_clk = regs[8'h68][7];
+
     localparam int TICK_DIV_TOP = 2435;     // CLK 107.4 MHz / 2435 ≈ 44.1 kHz
     logic [11:0] tick_counter_top;
     logic        sample_tick_top;
@@ -146,11 +123,6 @@ module ymf278_top
         end
     end
 
-    // 2c.2.c: extraer FNUM y OCTAVE del regfile, slot 0.
-    // Mapping bit-exact YMF278B (verificado contra openMSX YMF278.cc):
-    //   reg 0x20+slot: bits[7:1] → FN[6:0], bit[0] → wave[8].
-    //   reg 0x38+slot: bits[2:0] → FN[9:7], bit[3] → PRVB,
-    //                  bits[7:4] → OCT (4-bit signed).
     wire [9:0]        fn_slot0  = {regs[8'h38][2:0], regs[8'h20][7:1]};
     wire signed [3:0] oct_slot0 = regs[8'h38][7:4];
 
@@ -163,6 +135,29 @@ module ymf278_top
         .key_on         (keyon_slot0_clk),
         .sample_clk_en  (sample_tick_top),
         .phase_acc      (phase_acc_clk)
+    );
+
+    /***************************************************************
+     * Memory port (regs 02-06): pointer 24-bit + R/W vía SDRAM.
+     * También maneja el cache local del playback de slot 0 (cache
+     * 256 bytes en FFs). cache_index viene del phase_acc.
+     ***************************************************************/
+    logic [7:0]               mem_data_byte;
+    logic signed [15:0]       playback_sample_clk;
+    ymf278_mempointer u_mempointer (
+        .RESET_n            (RESET_n),
+        .CLK                (CLK),
+        .bus_reset_n        (bus_reset_n),
+        .reg_wr_stb         (reg_wr_stb),
+        .reg_addr           (reg_addr_latch),
+        .reg_data           (din),
+        .reg_rd_done_stb    (rd_done_strobe),
+        .bus_merq_n         (bus_merq_n),
+        .key_on_slot0       (keyon_slot0_clk),
+        .cache_index        (phase_acc_clk[17:10]),  // 2c.2.d: pitch via phase
+        .mem_data_byte      (mem_data_byte),
+        .playback_sample    (playback_sample_clk),
+        .Ram                (Ram)
     );
 
     // Read-back: reg 0x06 → memory data, regs 0xFC-0xFF → phase_acc[31:0]
