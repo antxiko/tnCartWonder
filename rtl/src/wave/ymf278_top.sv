@@ -108,12 +108,64 @@ module ymf278_top
         .Ram                (Ram)
     );
 
-    // Read-back: si reg seleccionado = 0x06, devolver byte de memoria;
-    // en cualquier otro caso 0x20 (stub que preserva detección
-    // MoonSound de VGMPlay).
+    /***************************************************************
+     * 2c.2.b: phase generator standalone instanciado.
+     *
+     * Inputs hardcoded (fnum=0, octave=0, key_on=key_on_slot0). Output
+     * phase_acc observable desde MSX vía read-back en regs 0xFC-0xFF
+     * (chip ID range del YMF278B real, no usado por software estándar).
+     *
+     * Sample tick: divider local en CLK a 44.1 kHz (TICK_DIV=2435,
+     * mismo cálculo que el cache local del mempointer).
+     *
+     * NO afecta al audio: phase_acc no entra al path del wave_sample.
+     * El cache local de mempointer sigue conduciendo el playback.
+     *
+     * Test BASIC esperado:
+     *   OUT &H7E,&HFC : INP(&H7F)         → 0 (sin key-on)
+     *   OUT &H7E,&H68 : OUT &H7F,&H80     → key-on slot 0, phase reset
+     *   OUT &H7E,&HFC : INP(&H7F)         → valor pequeño (>0)
+     *   (esperar varios segundos)
+     *   OUT &H7E,&HFD : INP(&H7F)         → byte intermedio creciendo
+     ***************************************************************/
+    localparam int TICK_DIV_TOP = 2435;     // CLK 107.4 MHz / 2435 ≈ 44.1 kHz
+    logic [11:0] tick_counter_top;
+    logic        sample_tick_top;
+    always_ff @(posedge CLK or negedge RESET_n) begin
+        if (!RESET_n || !bus_reset_n) begin
+            tick_counter_top <= 12'h0;
+            sample_tick_top  <= 1'b0;
+        end
+        else if (tick_counter_top == TICK_DIV_TOP - 1) begin
+            tick_counter_top <= 12'h0;
+            sample_tick_top  <= 1'b1;
+        end
+        else begin
+            tick_counter_top <= tick_counter_top + 12'd1;
+            sample_tick_top  <= 1'b0;
+        end
+    end
+
+    logic [31:0] phase_acc_clk;
+    ymf278_phase u_phase (
+        .RESET_n        (RESET_n),
+        .CLK            (CLK),
+        .fnum           (10'd0),
+        .octave         (4'sd0),
+        .key_on         (keyon_slot0_clk),
+        .sample_clk_en  (sample_tick_top),
+        .phase_acc      (phase_acc_clk)
+    );
+
+    // Read-back: reg 0x06 → memory data, regs 0xFC-0xFF → phase_acc[31:0]
+    // (debug observability del 2c.2.b), default 0x20 stub.
     always_comb begin
         case (reg_addr_latch)
             8'h06:    rd_data = mem_data_byte;
+            8'hFC:    rd_data = phase_acc_clk[7:0];
+            8'hFD:    rd_data = phase_acc_clk[15:8];
+            8'hFE:    rd_data = phase_acc_clk[23:16];
+            8'hFF:    rd_data = phase_acc_clk[31:24];
             default:  rd_data = 8'h20;
         endcase
     end
