@@ -138,12 +138,17 @@ module ymf278_top
     );
 
     /***************************************************************
-     * Memory port (regs 02-06): pointer 24-bit + R/W vía SDRAM.
-     * También maneja el cache local del playback de slot 0 (cache
-     * 256 bytes en FFs). cache_index viene del phase_acc.
+     * Memory port (regs 02-06) + wave_arbiter. ESTADO 2c.2.e.2a:
+     * arbiter v5 instanciado, fetch1 todavía NO (BusB con stub idle).
+     * Próximo sub-paso 2c.2.e.2b reinstanciará fetch1. Validado en
+     * MSX real con wavemem/wavedump/MoonBlaster FM/VGMPlay OPL3.
      ***************************************************************/
     logic [7:0]               mem_data_byte;
     logic signed [15:0]       playback_sample_clk;
+
+    RAM_IF Ram_mempointer();
+    RAM_IF Ram_fetch1();
+
     ymf278_mempointer u_mempointer (
         .RESET_n            (RESET_n),
         .CLK                (CLK),
@@ -154,14 +159,34 @@ module ymf278_top
         .reg_rd_done_stb    (rd_done_strobe),
         .bus_merq_n         (bus_merq_n),
         .key_on_slot0       (keyon_slot0_clk),
-        .cache_index        (phase_acc_clk[17:10]),  // 2c.2.d: pitch via phase
+        .cache_index        (phase_acc_clk[17:10]),
         .mem_data_byte      (mem_data_byte),
         .playback_sample    (playback_sample_clk),
-        .Ram                (Ram)
+        .Ram                (Ram_mempointer)
     );
 
-    // Read-back: reg 0x06 → memory data, regs 0xFC-0xFF → phase_acc[31:0]
-    // (debug observability del 2c.2.b), default 0x20 stub.
+    // BusB stub: fetch1 todavía no instanciado en 2c.2.e.2a. Drivear
+    // los signals HOST de Ram_fetch1 a defaults idle para que arbiter
+    // vea BusB siempre quiet (requesting_b=0). 2c.2.e.2b lo reemplaza
+    // por la instancia real de ymf278_fetch1.
+    assign Ram_fetch1.ADDR     = 24'h0;
+    assign Ram_fetch1.DIN      = 32'h0;
+    assign Ram_fetch1.DIN_SIZE = 3'b000;
+    assign Ram_fetch1.OE_n     = 1'b1;
+    assign Ram_fetch1.WE_n     = 1'b1;
+    assign Ram_fetch1.RFSH_n   = 1'b1;
+
+    wave_arbiter u_wave_arbiter (
+        .RESET_n,
+        .CLK,
+        .Primary    (Ram),
+        .BusA       (Ram_mempointer),
+        .BusB       (Ram_fetch1)
+    );
+
+    // Read-back: reg 0x06 → memory data, regs 0xFC-0xFF → phase_acc.
+    // (Sin 0xFA/0xFB porque fetch1 NO está instanciado.)
+    // Default 0x20 stub (preserva detección MoonSound).
     always_comb begin
         case (reg_addr_latch)
             8'h06:    rd_data = mem_data_byte;
