@@ -211,27 +211,62 @@ module ymf278_top
     end
 
     /***************************************************************
-     * 2b.3 Playback output: registramos playback_sample_clk en
-     * CLK_OPL3 con un FF (single, suficiente porque el signal cambia
-     * a sample rate 44 kHz, mucho más lento que CLK_OPL3 = 33.5 MHz).
-     * Luego sign-extiende a 24-bit para el mixer.
+     * 2c.2.f: interp lineal sobre fetch1 → playback real del YRW801.
      *
-     * El square wave de 2a se ha eliminado — playback toma su lugar.
+     * fetch1.sample_a / sample_b / frac → interp combinacional → out.
+     * Cuando key_on slot 0: playback toma interp.out (= sample real
+     * 8-bit unsigned del YRW801 con XOR 0x80, sign-extended a 16-bit,
+     * interpolado linealmente con frac=phase_acc[15:0]).
+     * Cuando !key_on: silencio (16'sh0000).
+     *
+     * Registrar el resultado en CLK ANTES de cruzar a CLK_OPL3 para
+     * evitar que glitches combinacionales del DSP se propaguen al FF
+     * de CLK_OPL3 (causaba chasquidos en MoonBlaster + corrupción de
+     * mem_data_byte por interferencia de timing en 2c.2.f v1).
+     *
+     * El cache local de mempointer.playback_sample queda inerte para
+     * audio (mempointer sigue activo para 7E/7F memory port).
      ***************************************************************/
+    logic signed [15:0] interp_out;
+    ymf278_interp u_interp (
+        .sample_a (fetch_sample_a),
+        .sample_b (fetch_sample_b),
+        .frac     (fetch_frac),
+        .out      (interp_out)
+    );
+
+    wire signed [15:0] playback_sample_active = keyon_slot0_clk ? interp_out
+                                                                : 16'sh0000;
+
+    // Registro en CLK domain (107 MHz) para "limpiar" la salida
+    // combinacional del DSP del interp.
+    logic signed [15:0] playback_sample_clk_reg;
+    always_ff @(posedge CLK or negedge RESET_n) begin
+        if (!RESET_n || !bus_reset_n) begin
+            playback_sample_clk_reg <= 16'sh0000;
+        end
+        else begin
+            playback_sample_clk_reg <= playback_sample_active;
+        end
+    end
+
+    // CDC CLK → CLK_OPL3. La señal cambia a sample rate (44 kHz),
+    // mucho más lento que CLK_OPL3 (33 MHz, period 30 ns), así que
+    // un solo FF es suficiente en la práctica (el riesgo de
+    // metaestabilidad es bajo cuando el setup window al CLK_OPL3
+    // edge es < 1 ns y la señal es estable durante muchos µs).
     logic signed [15:0] playback_sample_clkopl3;
     always_ff @(posedge CLK_OPL3 or negedge RESET_n) begin
         if (!RESET_n || !bus_reset_n) begin
             playback_sample_clkopl3 <= 16'sh0000;
         end
         else begin
-            playback_sample_clkopl3 <= playback_sample_clk;
+            playback_sample_clkopl3 <= playback_sample_clk_reg;
         end
     end
 
     // Sign-extend a 24-bit para sumar con mono_q en cartridge_opl3.sv
     assign wave_sample = {{8{playback_sample_clkopl3[15]}}, playback_sample_clkopl3};
-
-    // (RAM_IF lo drivea ymf278_mempointer arriba — ya no idle aquí)
 
 endmodule
 
