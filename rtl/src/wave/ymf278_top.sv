@@ -165,16 +165,23 @@ module ymf278_top
         .Ram                (Ram_mempointer)
     );
 
-    // BusB stub: fetch1 todavía no instanciado en 2c.2.e.2a. Drivear
-    // los signals HOST de Ram_fetch1 a defaults idle para que arbiter
-    // vea BusB siempre quiet (requesting_b=0). 2c.2.e.2b lo reemplaza
-    // por la instancia real de ymf278_fetch1.
-    assign Ram_fetch1.ADDR     = 24'h0;
-    assign Ram_fetch1.DIN      = 32'h0;
-    assign Ram_fetch1.DIN_SIZE = 3'b000;
-    assign Ram_fetch1.OE_n     = 1'b1;
-    assign Ram_fetch1.WE_n     = 1'b1;
-    assign Ram_fetch1.RFSH_n   = 1'b1;
+    // 2c.2.e.2b: fetch1 real, leyendo YRW801 desde 0x100000.
+    // Aislado del bus MSX por sdram_top_arbiter (priority A>B en main.sv).
+    logic signed [15:0] fetch_sample_a;
+    logic signed [15:0] fetch_sample_b;
+    logic        [15:0] fetch_frac;
+    ymf278_fetch1 u_fetch1 (
+        .RESET_n          (RESET_n),
+        .CLK              (CLK),
+        .bus_reset_n      (bus_reset_n),
+        .start_addr_sdram (24'h100000),
+        .phase_acc        (phase_acc_clk),
+        .key_on           (keyon_slot0_clk),
+        .sample_a         (fetch_sample_a),
+        .sample_b         (fetch_sample_b),
+        .frac             (fetch_frac),
+        .Ram              (Ram_fetch1)
+    );
 
     wave_arbiter u_wave_arbiter (
         .RESET_n,
@@ -184,12 +191,17 @@ module ymf278_top
         .BusB       (Ram_fetch1)
     );
 
-    // Read-back: reg 0x06 → memory data, regs 0xFC-0xFF → phase_acc.
-    // (Sin 0xFA/0xFB porque fetch1 NO está instanciado.)
-    // Default 0x20 stub (preserva detección MoonSound).
+    // Read-back:
+    //   reg 0x06 → memory data (mempointer)
+    //   regs 0xFA/0xFB → bytes raw fetch1 leídos del YRW801 (post-undo
+    //     del XOR 0x80 que aplicó fetch1 internamente)
+    //   regs 0xFC-0xFF → phase_acc[31:0]
+    //   default 0x20 (preserva detección MoonSound).
     always_comb begin
         case (reg_addr_latch)
             8'h06:    rd_data = mem_data_byte;
+            8'hFA:    rd_data = fetch_sample_a[15:8] ^ 8'h80;
+            8'hFB:    rd_data = fetch_sample_b[15:8] ^ 8'h80;
             8'hFC:    rd_data = phase_acc_clk[7:0];
             8'hFD:    rd_data = phase_acc_clk[15:8];
             8'hFE:    rd_data = phase_acc_clk[23:16];
