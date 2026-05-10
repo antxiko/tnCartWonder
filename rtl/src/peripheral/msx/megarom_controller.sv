@@ -35,6 +35,19 @@
 
 /***********************************************************************
  * メガロムコントローラーインターフェース
+ *
+ * MangOPL4 — AUDITORÍA DEL BUS SDRAM (2c.1, 2026-05-10):
+ *   El módulo MEGAROM_CONTROLLER (al final de este archivo) es host del
+ *   bus SDRAM (RAM_IF.HOST) y NO chequea Ram.ACK_n ni drivea Bus.WAIT_n.
+ *   Drivea Ram.OE_n combinacionalmente desde rd_mem_n y captura
+ *   Ram.DOUT cada ciclo. EXIGE OR-collapse o priority infinita aguas
+ *   arriba — un priority arbiter "limpio" que le deje ver DOUT stale al
+ *   perder grant rompe el boot del MSX (mapper fantasma + Nextor falla).
+ *   Si se cambia la arquitectura de arbitración, este host debe
+ *   refactorizarse PRIMERO (chequear ACK_n + retener WAIT_n) en el
+ *   mismo PR; nunca cambiar la arbitración aguas arriba sin tocar
+ *   esto antes. Usado por cartridge_megarom (idx 0) y cartridge_nextor
+ *   (idx 2) en main.sv.
  ***********************************************************************/
 interface MEGAROM_IF #(parameter ADDR_BIT_WIDTH=24, BANK_COUNT = 4);
     logic [ADDR_BIT_WIDTH-1:0]  MemoryTopAddr;                  // メモリ先頭アドレス

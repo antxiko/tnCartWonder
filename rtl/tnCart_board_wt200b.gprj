@@ -30,6 +30,7 @@
         <File path="src/peripheral/msx/tf_controller.sv" type="file.verilog" enable="1"/>
         <File path="src/peripheral/ram/ram.sv" type="file.verilog" enable="1"/>
         <File path="src/peripheral/ram/sdram.sv" type="file.verilog" enable="1"/>
+        <File path="src/peripheral/ram/sdram_top_arbiter.sv" type="file.verilog" enable="1"/>
         <File path="src/peripheral/ram/uma.sv" type="file.verilog" enable="1"/>
         <File path="src/peripheral/signal/attenuator.sv" type="file.verilog" enable="1"/>
         <File path="src/peripheral/signal/limiter.sv" type="file.verilog" enable="1"/>

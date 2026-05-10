@@ -35,6 +35,20 @@
 
 /***************************************************************
  * RAM カードリッジ
+ *
+ * MangOPL4 — AUDITORÍA DEL BUS SDRAM (2c.1, 2026-05-10):
+ *   Este host NO chequea Ram.ACK_n y NO drivea Bus.WAIT_n. Lee Ram.DOUT
+ *   directamente cada ciclo y mantiene Ram.OE_n / Ram.WE_n=0 sostenido
+ *   durante todo el M-cycle del Z80. Funciona porque la op SDRAM
+ *   (~75 ns) cabe sin holgura en T2/T3 del Z80 (~560 ns), pero EXIGE
+ *   que el bus SDRAM aguas arriba haga OR-collapse o priority infinita
+ *   sobre este host. NO es compatible con un priority arbiter "limpio"
+ *   que pueda dejarle ver DOUT stale al perder grant — el MSX BIOS lo
+ *   interpreta como mapper fantasma y aborta el boot. Si en el futuro
+ *   se cambia la arquitectura de arbitración, este patrón debe
+ *   refactorizarse PRIMERO (chequear ACK_n + retener WAIT_n) en el
+ *   mismo PR; nunca cambiar la arbitración aguas arriba sin tocar
+ *   esto antes.
  ***************************************************************/
 module CARTRIDGE_RAM #(
     parameter [23:0]        RAM_ADDR = 0,

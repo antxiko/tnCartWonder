@@ -35,6 +35,17 @@
 
 /***************************************************************
  * PAC ROM コントローラ
+ *
+ * MangOPL4 — AUDITORÍA DEL BUS SDRAM (2c.1, 2026-05-10):
+ *   Este host NO chequea Ram.ACK_n y NO drivea Bus.WAIT_n. Drivea
+ *   Ram.OE_n / Ram.WE_n=0 combinacional o registrado un único ciclo
+ *   sin esperar ACK, y captura Ram.DOUT directamente. EXIGE OR-collapse
+ *   o priority infinita aguas arriba — un priority arbiter "limpio" que
+ *   le deje ver DOUT stale al perder grant rompe el boot del MSX. Si se
+ *   cambia la arquitectura de arbitración, este host debe refactorizarse
+ *   PRIMERO (chequear ACK_n + retener WAIT_n) en el mismo PR; nunca
+ *   cambiar la arbitración aguas arriba sin tocar esto antes.
+ *   Usado por cartridge_fm (idx 1) en main.sv.
  ***************************************************************/
 module PACROM_CONTROLLER #(
     parameter               RAM_ADDR_BIOS = 0,

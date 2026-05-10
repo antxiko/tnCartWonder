@@ -63,24 +63,48 @@ module MAIN #(
     SOUND_IF #(.BIT_WIDTH(CONFIG::SOUND_BIT_WIDTH)) Sound[0:SOUND_COUNT-1]();
 
     /***************************************************************
-     * RAM I/F を複数に拡張
+     * RAM I/F を複数に拡張 — MangOPL4 Fase 2c.1: bifurcación dual-bus
+     *
+     * 5 hosts MSX (megarom, fm, nextor, ram, bootloader) → EXPANSION_RAM
+     *   con OR-collapse → MsxRam.
+     * Wave block (cartridge_opl3 → ymf278_top → wave_arbiter) → WaveRam.
+     * MsxRam y WaveRam → sdram_top_arbiter (priority A>B) → Ram → SDRAM.
+     *
+     * Por qué dual-bus en lugar de un solo OR-collapse:
+     *   Los 5 hosts MSX no chequean Ram.ACK_n y exigen OR-collapse o
+     *   priority infinita (auditoría 2c.1 en cartridge_ram.sv,
+     *   megarom_controller.sv, pacrom_controller.sv). Si fetch1 del
+     *   wave block comparte ese OR-collapse y asserta a la vez que
+     *   cart está en M-cycle, save_addr de la SDRAM se corrompe
+     *   (Z80 escribe a YRW801 area → ~256 KB perdidos del mapper).
+     *   La separación por priority A>B aísla al wave del bus MSX.
      ***************************************************************/
     localparam RAM_MEGAROM    = 0;
     localparam RAM_FM         = 1;
     localparam RAM_NEXTOR     = 2;
     localparam RAM_RAM        = 3;
     localparam RAM_BOOTLOADER = 4;
-    localparam RAM_WAVE       = 5;     // MangOPL4 Fase 2 — Wave block YMF278B
-    localparam RAM_COUNT      = 6;
+    localparam RAM_COUNT      = 5;
     RAM_IF ExpRam[0:RAM_COUNT-1]();
+    RAM_IF MsxRam();    // OR-collapse de los 5 hosts MSX
+    RAM_IF WaveRam();   // wave block (cartridge_opl3)
+
     EXPANSION_RAM #(
         .COUNT          (RAM_COUNT),
         .USE_FF         (CONFIG::RAM_IF_EXPANSION_USES_FF)
     ) u_expram (
         .RESET_n,
         .CLK,
-        .Primary        (Ram),
+        .Primary        (MsxRam),
         .Secondary      (ExpRam)
+    );
+
+    sdram_top_arbiter u_sdram_arb (
+        .RESET_n        (RESET_n),
+        .CLK            (CLK),
+        .Primary        (Ram),
+        .BusA           (MsxRam),
+        .BusB           (WaveRam)
     );
 
     /***************************************************************
@@ -272,21 +296,20 @@ module MAIN #(
             .CLK_OPL3       (CLK_OPL3),
             .Bus            (ExpBus[BUS_OPL3]),
             .Sound          (Sound[SOUND_OPL3]),
-            .Ram            (ExpRam[RAM_WAVE])      // MangOPL4 Fase 2: Wave SDRAM
+            .Ram            (WaveRam)               // MangOPL4 Fase 2c.1: bus dedicado wave
         );
     end
     else begin
         always_comb ExpBus[BUS_OPL3].connect_dummy();
         always_comb Sound[SOUND_OPL3].connect_dummy();
-        // ExpRam[RAM_WAVE] queda en idle; el OR-collapse arbiter no lo
-        // verá si OE_n/WE_n están a 1 — drive defaults seguros aquí.
+        // WaveRam idle (sdram_top_arbiter mutea B cuando OE_n/WE_n=1)
         always_comb begin
-            ExpRam[RAM_WAVE].ADDR     = 24'h0;
-            ExpRam[RAM_WAVE].DIN      = 32'h0;
-            ExpRam[RAM_WAVE].DIN_SIZE = 3'b000;
-            ExpRam[RAM_WAVE].OE_n     = 1'b1;
-            ExpRam[RAM_WAVE].WE_n     = 1'b1;
-            ExpRam[RAM_WAVE].RFSH_n   = 1'b1;
+            WaveRam.ADDR     = 24'h0;
+            WaveRam.DIN      = 32'h0;
+            WaveRam.DIN_SIZE = 3'b000;
+            WaveRam.OE_n     = 1'b1;
+            WaveRam.WE_n     = 1'b1;
+            WaveRam.RFSH_n   = 1'b1;
         end
     end
 
