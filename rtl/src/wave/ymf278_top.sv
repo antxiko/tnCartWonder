@@ -126,15 +126,32 @@ module ymf278_top
     wire [9:0]        fn_slot0  = {regs[8'h38][2:0], regs[8'h20][7:1]};
     wire signed [3:0] oct_slot0 = regs[8'h38][7:4];
 
+    /***************************************************************
+     * 2c.3.b: pipeline 8-stage que usa BSRAM externa (u_slot_state)
+     * como storage de phase_acc y key_on_prev. slot_idx hardcoded a 0
+     * (en 2c.3.c+ ciclará 0..1, 0..3, ..., 0..23).
+     ***************************************************************/
     logic [31:0] phase_acc_clk;
-    ymf278_phase u_phase (
-        .RESET_n        (RESET_n),
-        .CLK            (CLK),
-        .fnum           (fn_slot0),
-        .octave         (oct_slot0),
-        .key_on         (keyon_slot0_clk),
-        .sample_clk_en  (sample_tick_top),
-        .phase_acc      (phase_acc_clk)
+    logic [STATE_ADDR_BITS-1:0]        pipeline_state_read_addr;
+    logic [STATE_BITS_PER_SLOT-1:0]    pipeline_state_read_data;
+    logic [STATE_ADDR_BITS-1:0]        pipeline_state_write_addr;
+    logic [STATE_BITS_PER_SLOT-1:0]    pipeline_state_write_data;
+    logic                              pipeline_state_write_en;
+
+    ymf278_slot_pipeline u_pipeline (
+        .RESET_n          (RESET_n),
+        .CLK              (CLK),
+        .sample_tick      (sample_tick_top),
+        .slot_idx         (5'd0),                 // 2c.3.b: solo slot 0
+        .fnum             (fn_slot0),
+        .octave           (oct_slot0),
+        .key_on           (keyon_slot0_clk),
+        .state_read_addr  (pipeline_state_read_addr),
+        .state_read_data  (pipeline_state_read_data),
+        .state_write_addr (pipeline_state_write_addr),
+        .state_write_data (pipeline_state_write_data),
+        .state_write_en   (pipeline_state_write_en),
+        .phase_acc_out    (phase_acc_clk)
     );
 
     /***************************************************************
@@ -192,28 +209,17 @@ module ymf278_top
     );
 
     /***************************************************************
-     * 2c.3.a: infra BSRAM state file. Slot 0 hardcoded en read/write.
-     * Shadow del phase_acc en write_data. read_data expuesto en regs
-     * 0xF0-0xF3 para verificar que la BSRAM funciona correctamente.
-     *
-     * En 2c.3.b en adelante esta BSRAM contendrá el state completo de
-     * los 24 slots y será leida/escrita por el pipeline 8-stage.
+     * 2c.3.b: BSRAM state file conectada al pipeline. Ya no shadow:
+     * el pipeline lee/escribe el state autoritativo del slot.
      ***************************************************************/
-    logic [STATE_BITS_PER_SLOT-1:0] slot_state_write_data;
-    logic [STATE_BITS_PER_SLOT-1:0] slot_state_read_data;
-
-    // En 2c.3.a solo escribimos los primeros 32 bits (phase_acc shadow).
-    // El resto va a 0 (placeholder para campos futuros).
-    assign slot_state_write_data = {{(STATE_BITS_PER_SLOT-32){1'b0}}, phase_acc_clk};
-
     ymf278_slot_state u_slot_state (
         .CLK         (CLK),
         .RESET_n     (RESET_n),
-        .read_addr   (5'd0),                          // slot 0 hardcoded
-        .read_data   (slot_state_read_data),
-        .write_addr  (5'd0),                          // slot 0 hardcoded
-        .write_data  (slot_state_write_data),
-        .write_en    (1'b1)                           // write cada ciclo
+        .read_addr   (pipeline_state_read_addr),
+        .read_data   (pipeline_state_read_data),
+        .write_addr  (pipeline_state_write_addr),
+        .write_data  (pipeline_state_write_data),
+        .write_en    (pipeline_state_write_en)
     );
 
     // Read-back:
@@ -226,10 +232,10 @@ module ymf278_top
     always_comb begin
         case (reg_addr_latch)
             8'h06:    rd_data = mem_data_byte;
-            8'hF0:    rd_data = slot_state_read_data[7:0];
-            8'hF1:    rd_data = slot_state_read_data[15:8];
-            8'hF2:    rd_data = slot_state_read_data[23:16];
-            8'hF3:    rd_data = slot_state_read_data[31:24];
+            8'hF0:    rd_data = pipeline_state_read_data[7:0];
+            8'hF1:    rd_data = pipeline_state_read_data[15:8];
+            8'hF2:    rd_data = pipeline_state_read_data[23:16];
+            8'hF3:    rd_data = pipeline_state_read_data[31:24];
             8'hFA:    rd_data = fetch_sample_a[15:8] ^ 8'h80;
             8'hFB:    rd_data = fetch_sample_b[15:8] ^ 8'h80;
             8'hFC:    rd_data = phase_acc_clk[7:0];
