@@ -191,15 +191,45 @@ module ymf278_top
         .BusB       (Ram_fetch1)
     );
 
+    /***************************************************************
+     * 2c.3.a: infra BSRAM state file. Slot 0 hardcoded en read/write.
+     * Shadow del phase_acc en write_data. read_data expuesto en regs
+     * 0xF0-0xF3 para verificar que la BSRAM funciona correctamente.
+     *
+     * En 2c.3.b en adelante esta BSRAM contendrá el state completo de
+     * los 24 slots y será leida/escrita por el pipeline 8-stage.
+     ***************************************************************/
+    logic [STATE_BITS_PER_SLOT-1:0] slot_state_write_data;
+    logic [STATE_BITS_PER_SLOT-1:0] slot_state_read_data;
+
+    // En 2c.3.a solo escribimos los primeros 32 bits (phase_acc shadow).
+    // El resto va a 0 (placeholder para campos futuros).
+    assign slot_state_write_data = {{(STATE_BITS_PER_SLOT-32){1'b0}}, phase_acc_clk};
+
+    ymf278_slot_state u_slot_state (
+        .CLK         (CLK),
+        .RESET_n     (RESET_n),
+        .read_addr   (5'd0),                          // slot 0 hardcoded
+        .read_data   (slot_state_read_data),
+        .write_addr  (5'd0),                          // slot 0 hardcoded
+        .write_data  (slot_state_write_data),
+        .write_en    (1'b1)                           // write cada ciclo
+    );
+
     // Read-back:
     //   reg 0x06 → memory data (mempointer)
+    //   regs 0xF0-0xF3 → BSRAM slot 0 phase_acc shadow (debug 2c.3.a)
     //   regs 0xFA/0xFB → bytes raw fetch1 leídos del YRW801 (post-undo
     //     del XOR 0x80 que aplicó fetch1 internamente)
-    //   regs 0xFC-0xFF → phase_acc[31:0]
+    //   regs 0xFC-0xFF → phase_acc[31:0] (directo, sin BSRAM)
     //   default 0x20 (preserva detección MoonSound).
     always_comb begin
         case (reg_addr_latch)
             8'h06:    rd_data = mem_data_byte;
+            8'hF0:    rd_data = slot_state_read_data[7:0];
+            8'hF1:    rd_data = slot_state_read_data[15:8];
+            8'hF2:    rd_data = slot_state_read_data[23:16];
+            8'hF3:    rd_data = slot_state_read_data[31:24];
             8'hFA:    rd_data = fetch_sample_a[15:8] ^ 8'h80;
             8'hFB:    rd_data = fetch_sample_b[15:8] ^ 8'h80;
             8'hFC:    rd_data = phase_acc_clk[7:0];

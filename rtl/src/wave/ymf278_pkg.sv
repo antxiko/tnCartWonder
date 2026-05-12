@@ -44,6 +44,23 @@ package ymf278_pkg;
     // Igualmente cerca de los 44.1 kHz nominales del MoonSound real (-0.13%).
     localparam int SAMPLE_TICK_DIV = 760;
 
+    // State file por slot (BSRAM dual-port en ymf278_slot_state.sv).
+    // Plan 2c.3: 24 slots, cada uno con state persistente entre slot ticks.
+    // 128 bits/slot con headroom hasta el final de 2c.3 (EG state, cache fetch).
+    //
+    // Offsets de campos dentro del state vector (LSB-aligned):
+    //   [31:0]    phase_acc           (2c.3.a)
+    //   [47:32]   last_idx_fetched    (2c.3.b)
+    //   [55:48]   byte_a              (2c.3.b)
+    //   [63:56]   byte_b              (2c.3.b)
+    //   [64]      key_on_prev         (2c.3.b)
+    //   [81:65]   eg_level            (2c.3.h)
+    //   [84:82]   eg_state            (2c.3.h)
+    //   [100:85]  eg_counter          (2c.3.i)
+    //   [127:101] reservado
+    localparam int STATE_BITS_PER_SLOT = 128;
+    localparam int STATE_ADDR_BITS     = 5;     // 32 entries (24 usados)
+
 endpackage
 
 `default_nettype wire
