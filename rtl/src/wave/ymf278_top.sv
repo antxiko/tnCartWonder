@@ -123,35 +123,67 @@ module ymf278_top
         end
     end
 
-    wire [9:0]        fn_slot0  = {regs[8'h38][2:0], regs[8'h20][7:1]};
-    wire signed [3:0] oct_slot0 = regs[8'h38][7:4];
-
     /***************************************************************
-     * 2c.3.b: pipeline 8-stage que usa BSRAM externa (u_slot_state)
-     * como storage de phase_acc y key_on_prev. slot_idx hardcoded a 0
-     * (en 2c.3.c+ ciclará 0..1, 0..3, ..., 0..23).
+     * 2c.3.c: pipeline N=2 slots time-shared (slots 0 y 1).
+     *
+     * Arrays de regs por slot 0..23 generados con genvar. El pipeline
+     * expone current_slot (output) que indexa el mux para seleccionar
+     * fnum/octave/key_on del slot activo cycle by cycle.
+     *
+     * keyon_slot0_clk se mantiene como wire global para mempointer/
+     * fetch1 (que siguen siendo single-slot, hardcoded a slot 0).
      ***************************************************************/
-    logic [31:0] phase_acc_clk;
+    localparam int ACTIVE_SLOTS = 2;
+
+    wire [9:0]        fn_slots     [0:NUM_SLOTS-1];
+    wire signed [3:0] oct_slots    [0:NUM_SLOTS-1];
+    wire              keyon_slots  [0:NUM_SLOTS-1];
+    generate
+        genvar gi;
+        for (gi = 0; gi < NUM_SLOTS; gi = gi + 1) begin: g_slot_decode
+            assign fn_slots[gi]    = {regs[8'h38 + gi][2:0], regs[8'h20 + gi][7:1]};
+            assign oct_slots[gi]   = regs[8'h38 + gi][7:4];
+            assign keyon_slots[gi] = regs[8'h68 + gi][7];
+        end
+    endgenerate
+
+    wire [9:0]        fn_slot0  = fn_slots[0];
+    wire signed [3:0] oct_slot0 = oct_slots[0];
+
+    // Wires entre pipeline y BSRAM + mux por current_slot
+    logic [31:0]                       phase_acc_clk;
+    logic [STATE_ADDR_BITS-1:0]        pipeline_current_slot;
     logic [STATE_ADDR_BITS-1:0]        pipeline_state_read_addr;
     logic [STATE_BITS_PER_SLOT-1:0]    pipeline_state_read_data;
     logic [STATE_ADDR_BITS-1:0]        pipeline_state_write_addr;
     logic [STATE_BITS_PER_SLOT-1:0]    pipeline_state_write_data;
     logic                              pipeline_state_write_en;
 
-    ymf278_slot_pipeline u_pipeline (
-        .RESET_n          (RESET_n),
-        .CLK              (CLK),
-        .sample_tick      (sample_tick_top),
-        .slot_idx         (5'd0),                 // 2c.3.b: solo slot 0
-        .fnum             (fn_slot0),
-        .octave           (oct_slot0),
-        .key_on           (keyon_slot0_clk),
-        .state_read_addr  (pipeline_state_read_addr),
-        .state_read_data  (pipeline_state_read_data),
-        .state_write_addr (pipeline_state_write_addr),
-        .state_write_data (pipeline_state_write_data),
-        .state_write_en   (pipeline_state_write_en),
-        .phase_acc_out    (phase_acc_clk)
+    // Mux de regs basado en current_slot. Si current_slot >= NUM_SLOTS
+    // (no debería pasar con ACTIVE_SLOTS <= 24), fuerza slot 0 safe.
+    wire [4:0] mux_idx = (pipeline_current_slot < NUM_SLOTS[4:0])
+                       ? pipeline_current_slot
+                       : 5'd0;
+    wire [9:0]        pipeline_fnum   = fn_slots[mux_idx];
+    wire signed [3:0] pipeline_octave = oct_slots[mux_idx];
+    wire              pipeline_key_on = keyon_slots[mux_idx];
+
+    ymf278_slot_pipeline #(
+        .ACTIVE_SLOTS (ACTIVE_SLOTS)
+    ) u_pipeline (
+        .RESET_n             (RESET_n),
+        .CLK                 (CLK),
+        .sample_tick         (sample_tick_top),
+        .current_slot        (pipeline_current_slot),
+        .fnum                (pipeline_fnum),
+        .octave              (pipeline_octave),
+        .key_on              (pipeline_key_on),
+        .state_read_addr     (pipeline_state_read_addr),
+        .state_read_data     (pipeline_state_read_data),
+        .state_write_addr    (pipeline_state_write_addr),
+        .state_write_data    (pipeline_state_write_data),
+        .state_write_en      (pipeline_state_write_en),
+        .phase_acc_out_slot0 (phase_acc_clk)
     );
 
     /***************************************************************
