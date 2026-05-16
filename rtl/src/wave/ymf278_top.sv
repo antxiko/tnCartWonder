@@ -303,7 +303,36 @@ module ymf278_top
         .out      (interp_out)
     );
 
-    wire signed [15:0] playback_sample_active = keyon_slot0_clk ? interp_out
+    /***************************************************************
+     * 2c.3.g: atenuación TL (Total Level) del slot 0.
+     *
+     * TL viene del reg 0x50+N bits [7:1] (7-bit, 0=full, 127=silencio).
+     * Conversión bit-exact contra openMSX YMF278.cc::volTable:
+     *   scale = round(65536 × 2^(-TL/16))
+     * Multiplicación signed 17×17 → 34-bit, shift right 16 → 18-bit
+     * signed, saturado a 16-bit.
+     *
+     * Nota 2c.3.g: solo aplico TL al slot 0 (fetch1 sigue single-slot).
+     * El mixer 22-bit con 24 voces se introducirá cuando otros slots
+     * empiecen a contribuir audio (2c.3.h+).
+     ***************************************************************/
+    wire [6:0] tl_slot0 = regs[8'h50][7:1];
+    wire [15:0] tl_scale_slot0;
+    ymf278_exp_lut u_exp_lut_slot0 (
+        .tl    (tl_slot0),
+        .scale (tl_scale_slot0)
+    );
+
+    wire signed [16:0] interp_s17     = $signed({interp_out[15], interp_out});
+    wire signed [16:0] tl_scale_s17   = $signed({1'b0, tl_scale_slot0});
+    wire signed [33:0] tl_mul         = interp_s17 * tl_scale_s17;
+    wire signed [17:0] tl_mul_shifted = tl_mul[33:16];
+    wire signed [15:0] interp_attenuated =
+        (tl_mul_shifted > 18'sd32767)   ? 16'sd32767  :
+        (tl_mul_shifted < -18'sd32768)  ? -16'sd32768 :
+                                          tl_mul_shifted[15:0];
+
+    wire signed [15:0] playback_sample_active = keyon_slot0_clk ? interp_attenuated
                                                                 : 16'sh0000;
 
     // Registro en CLK domain (107 MHz) para "limpiar" la salida
