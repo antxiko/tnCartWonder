@@ -133,7 +133,7 @@ module ymf278_top
      * keyon_slot0_clk se mantiene como wire global para mempointer/
      * fetch1 (que siguen siendo single-slot, hardcoded a slot 0).
      ***************************************************************/
-    localparam int ACTIVE_SLOTS = 4;
+    localparam int ACTIVE_SLOTS = 8;
 
     wire [9:0]        fn_slots     [0:NUM_SLOTS-1];
     wire signed [3:0] oct_slots    [0:NUM_SLOTS-1];
