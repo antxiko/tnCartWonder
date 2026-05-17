@@ -138,12 +138,16 @@ module ymf278_top
     wire [9:0]        fn_slots     [0:NUM_SLOTS-1];
     wire signed [3:0] oct_slots    [0:NUM_SLOTS-1];
     wire              keyon_slots  [0:NUM_SLOTS-1];
+    wire [6:0]        tl_slots     [0:NUM_SLOTS-1];     // 2c.3.h
+    wire [3:0]        dl_slots     [0:NUM_SLOTS-1];     // 2c.3.h
     generate
         genvar gi;
         for (gi = 0; gi < NUM_SLOTS; gi = gi + 1) begin: g_slot_decode
             assign fn_slots[gi]    = {regs[8'h38 + gi][2:0], regs[8'h20 + gi][7:1]};
             assign oct_slots[gi]   = regs[8'h38 + gi][7:4];
             assign keyon_slots[gi] = regs[8'h68 + gi][7];
+            assign tl_slots[gi]    = regs[8'h50 + gi][7:1];
+            assign dl_slots[gi]    = regs[8'h98 + gi][7:4];
         end
     endgenerate
 
@@ -158,15 +162,21 @@ module ymf278_top
     logic [STATE_ADDR_BITS-1:0]        pipeline_state_write_addr;
     logic [STATE_BITS_PER_SLOT-1:0]    pipeline_state_write_data;
     logic                              pipeline_state_write_en;
+    logic signed [15:0]                pipeline_slot0_atten;
 
-    // Mux de regs basado en current_slot. Si current_slot >= NUM_SLOTS
-    // (no debería pasar con ACTIVE_SLOTS <= 24), fuerza slot 0 safe.
+    // Mux de regs basado en current_slot.
     wire [4:0] mux_idx = (pipeline_current_slot < NUM_SLOTS[4:0])
                        ? pipeline_current_slot
                        : 5'd0;
     wire [9:0]        pipeline_fnum   = fn_slots[mux_idx];
     wire signed [3:0] pipeline_octave = oct_slots[mux_idx];
     wire              pipeline_key_on = keyon_slots[mux_idx];
+    wire [6:0]        pipeline_tl     = tl_slots[mux_idx];
+    wire [3:0]        pipeline_dl     = dl_slots[mux_idx];
+    // Sample input al pipeline: solo slot 0 tiene sample real (fetch1
+    // single-slot). Otros slots reciben 0. Esto se conecta a interp_out
+    // que se calcula MÁS ABAJO en el top.
+    logic signed [15:0]                pipeline_slot_sample;
 
     ymf278_slot_pipeline #(
         .ACTIVE_SLOTS (ACTIVE_SLOTS)
@@ -178,12 +188,16 @@ module ymf278_top
         .fnum                (pipeline_fnum),
         .octave              (pipeline_octave),
         .key_on              (pipeline_key_on),
+        .tl                  (pipeline_tl),
+        .dl                  (pipeline_dl),
+        .slot_sample_in      (pipeline_slot_sample),
         .state_read_addr     (pipeline_state_read_addr),
         .state_read_data     (pipeline_state_read_data),
         .state_write_addr    (pipeline_state_write_addr),
         .state_write_data    (pipeline_state_write_data),
         .state_write_en      (pipeline_state_write_en),
-        .phase_acc_out_slot0 (phase_acc_clk)
+        .phase_acc_out_slot0 (phase_acc_clk),
+        .slot0_atten_out     (pipeline_slot0_atten)
     );
 
     /***************************************************************
@@ -304,36 +318,25 @@ module ymf278_top
     );
 
     /***************************************************************
-     * 2c.3.g: atenuación TL (Total Level) del slot 0.
+     * 2c.3.h: atenuación TL + EG ahora vive DENTRO del pipeline.
      *
-     * TL viene del reg 0x50+N bits [7:1] (7-bit, 0=full, 127=silencio).
-     * Conversión bit-exact contra openMSX YMF278.cc::volTable:
-     *   scale = round(65536 × 2^(-TL/16))
-     * Multiplicación signed 17×17 → 34-bit, shift right 16 → 18-bit
-     * signed, saturado a 16-bit.
+     * El pipeline expone slot0_atten_out (snapshot del sample slot 0
+     * tras pasar por interp + EG + TL). El multiplier TL del 2c.3.g
+     * que estaba aquí se ha movido al pipeline para reusarse con
+     * todos los slots.
      *
-     * Nota 2c.3.g: solo aplico TL al slot 0 (fetch1 sigue single-slot).
-     * El mixer 22-bit con 24 voces se introducirá cuando otros slots
-     * empiecen a contribuir audio (2c.3.h+).
+     * Conectamos el sample del slot 0 a pipeline_slot_sample (mux
+     * por current_slot del pipeline: cuando procesa slot 0 le pasa
+     * interp_out, cuando procesa slot 1..23 le pasa 0 porque fetch1
+     * sigue single-slot).
      ***************************************************************/
-    wire [6:0] tl_slot0 = regs[8'h50][7:1];
-    wire [15:0] tl_scale_slot0;
-    ymf278_exp_lut u_exp_lut_slot0 (
-        .tl    (tl_slot0),
-        .scale (tl_scale_slot0)
-    );
+    assign pipeline_slot_sample = (pipeline_current_slot == '0)
+                                ? interp_out
+                                : 16'sh0000;
 
-    wire signed [16:0] interp_s17     = $signed({interp_out[15], interp_out});
-    wire signed [16:0] tl_scale_s17   = $signed({1'b0, tl_scale_slot0});
-    wire signed [33:0] tl_mul         = interp_s17 * tl_scale_s17;
-    wire signed [17:0] tl_mul_shifted = tl_mul[33:16];
-    wire signed [15:0] interp_attenuated =
-        (tl_mul_shifted > 18'sd32767)   ? 16'sd32767  :
-        (tl_mul_shifted < -18'sd32768)  ? -16'sd32768 :
-                                          tl_mul_shifted[15:0];
-
-    wire signed [15:0] playback_sample_active = keyon_slot0_clk ? interp_attenuated
-                                                                : 16'sh0000;
+    // El EG ya silencia cuando key_on=0 (eg_level=127 → atten≈0). No
+    // necesito mux exterior por keyon_slot0_clk.
+    wire signed [15:0] playback_sample_active = pipeline_slot0_atten;
 
     // Registro en CLK domain (107 MHz) para "limpiar" la salida
     // combinacional del DSP del interp.
