@@ -1,32 +1,35 @@
 //
 // ymf278_eg.sv
 //
-// MangOPL4 Fase 2c.3.h — Envelope Generator (EG) FSM esqueleto.
+// MangOPL4 Fase 2c.3.i — Envelope Generator (EG) FSM con state ATT
+// real driven por tabla AR (Attack Rate).
 //
-// Estados (3-bit):
+// Estados:
 //   EG_OFF   = 0   silencio total (level=127)
-//   EG_ATT   = 1   attack: level desciende 0x7F → 0 (placeholder en v1)
-//   EG_DEC1  = 2   decay 1: level sube 0 → DL
-//   EG_DEC2  = 3   decay 2: level sigue subiendo DL → 127 (slow)
-//   EG_SUS   = 4   sustain: hold
-//   EG_REL   = 5   release: level → 127
-//   EG_DAMP  = 6   damp: rampa rápida a silencio antes de key_on
+//   EG_ATT   = 1   attack: level desciende 127 → 0 según AR + tabla
+//   EG_DEC1  = 2   (placeholder, transición instant a SUS en 2c.3.i)
+//   EG_DEC2  = 3   (placeholder)
+//   EG_SUS   = 4   sustain: hold en DL
+//   EG_REL   = 5   (placeholder, transición instant a OFF en 2c.3.i)
+//   EG_DAMP  = 6   (placeholder, 2c.3.k)
 //
-// Sub-paso 2c.3.h v1: transiciones INMEDIATAS (sin rate counter, sin
-// tablas AR/D1R/D2R/RR). El EG se reduce funcionalmente a:
-//   - key_on edge 0→1: salto directo a EG_SUS con level=DL.
-//   - key_on edge 1→0: salto directo a EG_OFF con level=127.
-//   - states transitorios (ATT/DEC1/DEC2/REL): skip inmediato.
+// Sub-paso 2c.3.i: solo ATT con rate counter real. DEC1/2/REL/DAMP
+// se completan en 2c.3.j/k.
 //
-// Esto da DL audible: software escribe DL en reg 0x98+slot bits [7:4]
-// y eg_level se queda en DL_internal durante el sustain, atenuando el
-// audio antes del TL.
+// ATT behavior:
+//   - Rising edge key_on (con ar < 15): EG_ATT, level=127 (silencio),
+//     counter=0.
+//   - Cada slot_tick: counter++. Si counter & ((1<<shift)-1) == 0 →
+//     decrement level por inc (de tabla eg_lut).
+//   - Cuando level llega a 0 → EG_SUS con level=DL.
+//   - ar=15 → instant attack (skip ATT, salto directo a SUS).
+//   - ar=0 → infinitely slow attack (stays at silence).
 //
-// 2c.3.i añadirá AR (attack rate) con tabla bit-exact contra openMSX.
-// 2c.3.j añadirá D1R/D2R/SUS/REL completos.
+// Counter es 16-bit. Wraps en ~1.5 sec a 44 kHz sample rate.
 //
-// Combinacional puro (state_next/level_next se latchean en el pipeline
-// stage 6 → stage 7 write a BSRAM).
+// Nota: el ATT es LINEAR en 2c.3.i (eg_level -= inc). El openMSX usa
+// curva exponencial (`eg_vol -= ~eg_vol * inc / 8`). Refinable a
+// bit-exact en 2c.3.j+ cuando hagamos DEC también.
 //
 // BSD 3-Clause License
 // Copyright (c) 2026, Jokin Miragaia <tech.fxmedia@gmail.com>
@@ -39,15 +42,18 @@ module ymf278_eg
     // State actual (de BSRAM slot)
     input  wire [2:0]               eg_state_in,
     input  wire [7:0]               eg_level_in,
+    input  wire [15:0]              eg_counter_in,
     input  wire                     key_on,
     input  wire                     key_on_prev,
 
-    // Reg params del slot (en 2c.3.h v1 solo DL se usa)
-    input  wire [3:0]               dl,           // reg 0x98+N bits [7:4]
+    // Reg params del slot
+    input  wire [3:0]               ar,             // reg 0x80+N bits [7:4]
+    input  wire [3:0]               dl,             // reg 0x98+N bits [7:4]
 
     // Next state (combinacional)
     output logic [2:0]              eg_state_out,
-    output logic [7:0]              eg_level_out
+    output logic [7:0]              eg_level_out,
+    output logic [15:0]             eg_counter_out
 );
 
     localparam logic [2:0] EG_OFF  = 3'd0;
@@ -58,41 +64,83 @@ module ymf278_eg
     localparam logic [2:0] EG_REL  = 3'd5;
     localparam logic [2:0] EG_DAMP = 3'd6;
 
-    // DL_internal: 4-bit DL del reg → 7-bit atten level (compatible con
-    // formato TL del exp_lut). dl=0 → 0 (no atten extra), dl=15 → 120
-    // (-45 dB extra). Step ~6 dB por unit dl (4× TL granularity).
-    // Coherente con openMSX que usa dl<<5 sobre 9-bit, equivalente a
-    // dl<<3 sobre 7-bit (similar magnitude).
     wire [7:0] dl_internal = (dl == 4'd15) ? 8'd120 : {1'b0, dl, 3'b000};
+
+    // Rate efectivo. En 2c.3.i sin RC/OCT extras: actual_rate = AR << 2
+    // (excepto AR=0 que da rate 0).
+    wire [5:0] actual_rate = (ar == 4'd0) ? 6'd0 : {ar, 2'b00};
+
+    // LUT lookup
+    wire [3:0] rate_idx, rate_shift;
+    wire [15:0] counter_shifted = eg_counter_in >> rate_shift;
+    wire [2:0]  step_idx        = counter_shifted[2:0];
+    wire [2:0]  inc;
+    ymf278_eg_lut u_eg_lut (
+        .actual_rate (actual_rate),
+        .step_idx    (step_idx),
+        .rate_idx    (rate_idx),
+        .rate_shift  (rate_shift),
+        .inc         (inc)
+    );
+
+    // Tick condition: low bits of counter == 0
+    wire [15:0] counter_mask = (16'd1 << rate_shift) - 16'd1;
+    wire        tick_fires   = (eg_counter_in & counter_mask) == 16'd0;
+
+    // ATT linear decrement
+    wire [8:0] level_minus_inc = {1'b0, eg_level_in} - {6'd0, inc};
+    wire       level_reaches_zero = level_minus_inc[8] || (eg_level_in <= {5'd0, inc});
 
     always_comb begin
         // Defaults: hold
-        eg_state_out = eg_state_in;
-        eg_level_out = eg_level_in;
+        eg_state_out   = eg_state_in;
+        eg_level_out   = eg_level_in;
+        eg_counter_out = eg_counter_in;
 
         if (key_on && !key_on_prev) begin
-            // Rising edge: arranca envelope. Salto inmediato a SUS con
-            // level=DL (ATT y DEC1/2 instantáneos en v1).
-            eg_state_out = EG_SUS;
-            eg_level_out = dl_internal;
+            // Rising edge: start attack
+            if (ar == 4'd15) begin
+                // Instant attack: skip directo a SUS con level=DL
+                eg_state_out = EG_SUS;
+                eg_level_out = dl_internal;
+            end
+            else begin
+                eg_state_out = EG_ATT;
+                eg_level_out = 8'd127;        // start at silence
+            end
+            eg_counter_out = 16'd0;
         end
         else if (!key_on && key_on_prev) begin
-            // Falling edge: release inmediato.
-            eg_state_out = EG_OFF;
-            eg_level_out = 8'd127;
+            // Falling edge: release inmediato
+            eg_state_out   = EG_OFF;
+            eg_level_out   = 8'd127;
+            eg_counter_out = 16'd0;
         end
         else begin
             unique case (eg_state_in)
                 EG_OFF: begin
-                    eg_level_out = 8'd127;        // silencio
+                    eg_level_out = 8'd127;
+                end
+                EG_ATT: begin
+                    // Counter siempre avanza
+                    eg_counter_out = eg_counter_in + 16'd1;
+                    // Si tick fires y AR != 0, decrement
+                    if (tick_fires && (ar != 4'd0)) begin
+                        if (level_reaches_zero) begin
+                            // Attack completo → SUS con level=DL
+                            eg_state_out = EG_SUS;
+                            eg_level_out = dl_internal;
+                        end
+                        else begin
+                            eg_level_out = level_minus_inc[7:0];
+                        end
+                    end
                 end
                 EG_SUS: begin
-                    eg_level_out = dl_internal;   // hold en DL
+                    eg_level_out = dl_internal;
                 end
-                EG_ATT, EG_DEC1, EG_DEC2, EG_REL, EG_DAMP: begin
-                    // Transitorios: skipean inmediato (v1).
-                    // Estos casos solo se alcanzan via load inicial de
-                    // BSRAM (post-reset son OFF).
+                EG_DEC1, EG_DEC2, EG_REL, EG_DAMP: begin
+                    // Placeholders 2c.3.j/k: skipean instant
                     eg_state_out = EG_OFF;
                     eg_level_out = 8'd127;
                 end

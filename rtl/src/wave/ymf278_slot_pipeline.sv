@@ -52,6 +52,7 @@ module ymf278_slot_pipeline
     input  wire                              key_on,
     input  wire [6:0]                        tl,             // 2c.3.h
     input  wire [3:0]                        dl,             // 2c.3.h
+    input  wire [3:0]                        ar,             // 2c.3.i
     input  wire signed [15:0]                slot_sample_in, // 2c.3.h
 
     // State file external (BSRAM dual-port)
@@ -95,6 +96,7 @@ module ymf278_slot_pipeline
     wire                   state_key_on_prev = state_buffer[64];
     wire [16:0]            state_eg_level    = state_buffer[81:65];
     wire [2:0]             state_eg_state    = state_buffer[84:82];
+    wire [15:0]            state_eg_counter  = state_buffer[100:85];
 
     /***************************************************************
      * Stage 2 compute: new phase_acc + new key_on_prev (combinacional)
@@ -122,14 +124,18 @@ module ymf278_slot_pipeline
      ***************************************************************/
     logic [2:0]    new_eg_state;
     logic [7:0]    new_eg_level;
+    logic [15:0]   new_eg_counter;
     ymf278_eg u_eg (
-        .eg_state_in  (state_eg_state),
-        .eg_level_in  (state_eg_level[7:0]),
-        .key_on       (key_on),
-        .key_on_prev  (state_key_on_prev),
-        .dl           (dl),
-        .eg_state_out (new_eg_state),
-        .eg_level_out (new_eg_level)
+        .eg_state_in    (state_eg_state),
+        .eg_level_in    (state_eg_level[7:0]),
+        .eg_counter_in  (state_eg_counter),
+        .key_on         (key_on),
+        .key_on_prev    (state_key_on_prev),
+        .ar             (ar),
+        .dl             (dl),
+        .eg_state_out   (new_eg_state),
+        .eg_level_out   (new_eg_level),
+        .eg_counter_out (new_eg_counter)
     );
 
     // atten_total = TL + (eg_level >> 1). eg_level es 8-bit, shift 1
@@ -247,7 +253,8 @@ module ymf278_slot_pipeline
     assign state_read_addr  = current_slot;
     assign state_write_addr = current_slot;
     assign state_write_data = {
-        {(STATE_BITS_PER_SLOT-85){1'b0}},                       // [127:85] reservado
+        {(STATE_BITS_PER_SLOT-101){1'b0}},                       // [127:101] reservado
+        new_eg_counter,                                          // [100:85]
         new_eg_state,                                            // [84:82]
         {{9{1'b0}}, new_eg_level},                               // [81:65] eg_level (17 bits, top 9 a 0)
         new_key_on_prev,                                         // [64]

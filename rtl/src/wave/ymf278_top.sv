@@ -140,6 +140,7 @@ module ymf278_top
     wire              keyon_slots  [0:NUM_SLOTS-1];
     wire [6:0]        tl_slots     [0:NUM_SLOTS-1];     // 2c.3.h
     wire [3:0]        dl_slots     [0:NUM_SLOTS-1];     // 2c.3.h
+    wire [3:0]        ar_slots     [0:NUM_SLOTS-1];     // 2c.3.i
     generate
         genvar gi;
         for (gi = 0; gi < NUM_SLOTS; gi = gi + 1) begin: g_slot_decode
@@ -148,6 +149,7 @@ module ymf278_top
             assign keyon_slots[gi] = regs[8'h68 + gi][7];
             assign tl_slots[gi]    = regs[8'h50 + gi][7:1];
             assign dl_slots[gi]    = regs[8'h98 + gi][7:4];
+            assign ar_slots[gi]    = regs[8'h80 + gi][7:4];
         end
     endgenerate
 
@@ -173,6 +175,7 @@ module ymf278_top
     wire              pipeline_key_on = keyon_slots[mux_idx];
     wire [6:0]        pipeline_tl     = tl_slots[mux_idx];
     wire [3:0]        pipeline_dl     = dl_slots[mux_idx];
+    wire [3:0]        pipeline_ar     = ar_slots[mux_idx];
     // Sample input al pipeline: solo slot 0 tiene sample real (fetch1
     // single-slot). Otros slots reciben 0. Esto se conecta a interp_out
     // que se calcula MÁS ABAJO en el top.
@@ -190,6 +193,7 @@ module ymf278_top
         .key_on              (pipeline_key_on),
         .tl                  (pipeline_tl),
         .dl                  (pipeline_dl),
+        .ar                  (pipeline_ar),
         .slot_sample_in      (pipeline_slot_sample),
         .state_read_addr     (pipeline_state_read_addr),
         .state_read_data     (pipeline_state_read_data),
