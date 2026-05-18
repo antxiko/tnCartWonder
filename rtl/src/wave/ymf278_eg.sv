@@ -1,35 +1,37 @@
 //
 // ymf278_eg.sv
 //
-// MangOPL4 Fase 2c.3.i — Envelope Generator (EG) FSM con state ATT
-// real driven por tabla AR (Attack Rate).
+// MangOPL4 Fase 2c.3.j — Envelope Generator (EG) FSM con DADSR completo.
 //
 // Estados:
-//   EG_OFF   = 0   silencio total (level=127)
-//   EG_ATT   = 1   attack: level desciende 127 → 0 según AR + tabla
-//   EG_DEC1  = 2   (placeholder, transición instant a SUS en 2c.3.i)
-//   EG_DEC2  = 3   (placeholder)
-//   EG_SUS   = 4   sustain: hold en DL
-//   EG_REL   = 5   (placeholder, transición instant a OFF en 2c.3.i)
-//   EG_DAMP  = 6   (placeholder, 2c.3.k)
+//   EG_OFF   = 0   silencio (level=127, hold)
+//   EG_ATT   = 1   attack: level desciende 127→0 con AR (linear, refinable)
+//   EG_DEC1  = 2   decay 1: level sube 0→DL con D1R
+//   EG_DEC2  = 3   decay 2: level sube DL→127 con D2R (sustain natural)
+//   EG_SUS   = 4   (alias estado: openMSX usa DEC2 continuo; reservado)
+//   EG_REL   = 5   release: level sube actual→127 con RR. Después EG_OFF.
+//   EG_DAMP  = 6   placeholder (2c.3.k)
 //
-// Sub-paso 2c.3.i: solo ATT con rate counter real. DEC1/2/REL/DAMP
-// se completan en 2c.3.j/k.
+// Sub-paso 2c.3.j: DEC1/DEC2/REL con rate tables. Ningun parámetro RC/
+// OCT extras (2c.3.k). ATT sigue linear.
 //
-// ATT behavior:
-//   - Rising edge key_on (con ar < 15): EG_ATT, level=127 (silencio),
-//     counter=0.
-//   - Cada slot_tick: counter++. Si counter & ((1<<shift)-1) == 0 →
-//     decrement level por inc (de tabla eg_lut).
-//   - Cuando level llega a 0 → EG_SUS con level=DL.
-//   - ar=15 → instant attack (skip ATT, salto directo a SUS).
-//   - ar=0 → infinitely slow attack (stays at silence).
+// Convención de eg_level (formato atenuación log-like, 8-bit):
+//   0   = max volume (no atten)
+//   127 = silence (max atten)
+// ATT desciende (de silencio hacia max), DEC/REL ascienden (max hacia silence).
 //
-// Counter es 16-bit. Wraps en ~1.5 sec a 44 kHz sample rate.
-//
-// Nota: el ATT es LINEAR en 2c.3.i (eg_level -= inc). El openMSX usa
-// curva exponencial (`eg_vol -= ~eg_vol * inc / 8`). Refinable a
-// bit-exact en 2c.3.j+ cuando hagamos DEC también.
+// Behavior:
+//   - key_on rising:
+//       AR=15 → instant attack (= no att), salto a DEC1 con level=0.
+//       AR=0  → stays in EG_ATT silencio forever.
+//       sino  → EG_ATT con level=127, counter=0.
+//   - key_on falling (cualquier state activo):
+//       → EG_REL con counter=0. eg_level se mantiene como estaba.
+//         (release ramps FROM current level UP to 127).
+//   - ATT done → EG_DEC1 con counter=0.
+//   - DEC1 al alcanzar DL → EG_DEC2.
+//   - DEC2 al alcanzar 127 → EG_OFF.
+//   - REL al alcanzar 127 → EG_OFF.
 //
 // BSD 3-Clause License
 // Copyright (c) 2026, Jokin Miragaia <tech.fxmedia@gmail.com>
@@ -48,7 +50,10 @@ module ymf278_eg
 
     // Reg params del slot
     input  wire [3:0]               ar,             // reg 0x80+N bits [7:4]
+    input  wire [3:0]               d1r,            // reg 0x80+N bits [3:0]
     input  wire [3:0]               dl,             // reg 0x98+N bits [7:4]
+    input  wire [3:0]               d2r,            // reg 0x98+N bits [3:0]
+    input  wire [3:0]               rr,             // reg 0xB0+N bits [3:0]
 
     // Next state (combinacional)
     output logic [2:0]              eg_state_out,
@@ -66,9 +71,18 @@ module ymf278_eg
 
     wire [7:0] dl_internal = (dl == 4'd15) ? 8'd120 : {1'b0, dl, 3'b000};
 
-    // Rate efectivo. En 2c.3.i sin RC/OCT extras: actual_rate = AR << 2
-    // (excepto AR=0 que da rate 0).
-    wire [5:0] actual_rate = (ar == 4'd0) ? 6'd0 : {ar, 2'b00};
+    // Selección de rate según estado actual.
+    logic [3:0] active_rate_reg;
+    always_comb begin
+        unique case (eg_state_in)
+            EG_ATT:  active_rate_reg = ar;
+            EG_DEC1: active_rate_reg = d1r;
+            EG_DEC2: active_rate_reg = d2r;
+            EG_REL:  active_rate_reg = rr;
+            default: active_rate_reg = 4'd0;
+        endcase
+    end
+    wire [5:0] actual_rate = (active_rate_reg == 4'd0) ? 6'd0 : {active_rate_reg, 2'b00};
 
     // LUT lookup
     wire [3:0] rate_idx, rate_shift;
@@ -87,9 +101,15 @@ module ymf278_eg
     wire [15:0] counter_mask = (16'd1 << rate_shift) - 16'd1;
     wire        tick_fires   = (eg_counter_in & counter_mask) == 16'd0;
 
-    // ATT linear decrement
-    wire [8:0] level_minus_inc = {1'b0, eg_level_in} - {6'd0, inc};
-    wire       level_reaches_zero = level_minus_inc[8] || (eg_level_in <= {5'd0, inc});
+    // ATT (descending): level -= inc.
+    wire [8:0] att_minus       = {1'b0, eg_level_in} - {6'd0, inc};
+    wire       att_at_zero     = att_minus[8] || (eg_level_in <= {5'd0, inc});
+
+    // DEC/REL (ascending): level += inc, saturate at 127.
+    wire [8:0] dec_plus        = {1'b0, eg_level_in} + {6'd0, inc};
+    wire [7:0] dec_plus_satd   = (dec_plus > 9'd127) ? 8'd127 : dec_plus[7:0];
+    wire       dec_at_dl       = dec_plus_satd >= dl_internal;
+    wire       dec_at_127      = dec_plus_satd == 8'd127;
 
     always_comb begin
         // Defaults: hold
@@ -98,22 +118,22 @@ module ymf278_eg
         eg_counter_out = eg_counter_in;
 
         if (key_on && !key_on_prev) begin
-            // Rising edge: start attack
+            // Rising edge: arranca attack.
             if (ar == 4'd15) begin
-                // Instant attack: skip directo a SUS con level=DL
-                eg_state_out = EG_SUS;
-                eg_level_out = dl_internal;
+                // Instant attack: skip directo a DEC1 con level=0.
+                eg_state_out = EG_DEC1;
+                eg_level_out = 8'd0;
             end
             else begin
                 eg_state_out = EG_ATT;
-                eg_level_out = 8'd127;        // start at silence
+                eg_level_out = 8'd127;       // start at silence
             end
             eg_counter_out = 16'd0;
         end
         else if (!key_on && key_on_prev) begin
-            // Falling edge: release inmediato
-            eg_state_out   = EG_OFF;
-            eg_level_out   = 8'd127;
+            // Falling edge: arranca release. eg_level se mantiene
+            // como estaba, RR lo subirá a 127.
+            eg_state_out   = EG_REL;
             eg_counter_out = 16'd0;
         end
         else begin
@@ -121,29 +141,82 @@ module ymf278_eg
                 EG_OFF: begin
                     eg_level_out = 8'd127;
                 end
+
                 EG_ATT: begin
-                    // Counter siempre avanza
                     eg_counter_out = eg_counter_in + 16'd1;
-                    // Si tick fires y AR != 0, decrement
                     if (tick_fires && (ar != 4'd0)) begin
-                        if (level_reaches_zero) begin
-                            // Attack completo → SUS con level=DL
-                            eg_state_out = EG_SUS;
-                            eg_level_out = dl_internal;
+                        if (att_at_zero) begin
+                            // Attack completo → DEC1
+                            eg_state_out   = EG_DEC1;
+                            eg_level_out   = 8'd0;
+                            eg_counter_out = 16'd0;
                         end
                         else begin
-                            eg_level_out = level_minus_inc[7:0];
+                            eg_level_out = att_minus[7:0];
                         end
                     end
                 end
+
+                EG_DEC1: begin
+                    eg_counter_out = eg_counter_in + 16'd1;
+                    if (tick_fires && (d1r != 4'd0)) begin
+                        if (dec_at_dl) begin
+                            eg_state_out   = EG_DEC2;
+                            eg_level_out   = dl_internal;
+                            eg_counter_out = 16'd0;
+                        end
+                        else begin
+                            eg_level_out = dec_plus_satd;
+                        end
+                    end
+                end
+
+                EG_DEC2: begin
+                    eg_counter_out = eg_counter_in + 16'd1;
+                    if (tick_fires && (d2r != 4'd0)) begin
+                        if (dec_at_127) begin
+                            // Decay 2 alcanzó silencio total → OFF.
+                            eg_state_out   = EG_OFF;
+                            eg_level_out   = 8'd127;
+                            eg_counter_out = 16'd0;
+                        end
+                        else begin
+                            eg_level_out = dec_plus_satd;
+                        end
+                    end
+                end
+
+                EG_REL: begin
+                    eg_counter_out = eg_counter_in + 16'd1;
+                    if (tick_fires && (rr != 4'd0)) begin
+                        if (dec_at_127) begin
+                            eg_state_out   = EG_OFF;
+                            eg_level_out   = 8'd127;
+                            eg_counter_out = 16'd0;
+                        end
+                        else begin
+                            eg_level_out = dec_plus_satd;
+                        end
+                    end
+                    else if (rr == 4'd0) begin
+                        // RR=0: release infinito (hold actual)
+                    end
+                end
+
                 EG_SUS: begin
-                    eg_level_out = dl_internal;
+                    // Compat con residual BSRAM o software que ponga
+                    // explicit EG_SUS. YMF278B real no transiciona aquí
+                    // (DEC2 actúa como sustain natural), pero si llegamos
+                    // mantenemos el level actual (no silenciamos).
+                    eg_level_out = eg_level_in;
                 end
-                EG_DEC1, EG_DEC2, EG_REL, EG_DAMP: begin
-                    // Placeholders 2c.3.j/k: skipean instant
-                    eg_state_out = EG_OFF;
-                    eg_level_out = 8'd127;
+
+                EG_DAMP: begin
+                    // Placeholder 2c.3.k: DAMP rápido a silencio. En
+                    // 2c.3.j tratamos como hold defensive.
+                    eg_level_out = eg_level_in;
                 end
+
                 default: begin
                     eg_state_out = EG_OFF;
                     eg_level_out = 8'd127;

@@ -53,6 +53,9 @@ module ymf278_slot_pipeline
     input  wire [6:0]                        tl,             // 2c.3.h
     input  wire [3:0]                        dl,             // 2c.3.h
     input  wire [3:0]                        ar,             // 2c.3.i
+    input  wire [3:0]                        d1r,            // 2c.3.j
+    input  wire [3:0]                        d2r,            // 2c.3.j
+    input  wire [3:0]                        rr,             // 2c.3.j
     input  wire signed [15:0]                slot_sample_in, // 2c.3.h
 
     // State file external (BSRAM dual-port)
@@ -132,7 +135,10 @@ module ymf278_slot_pipeline
         .key_on         (key_on),
         .key_on_prev    (state_key_on_prev),
         .ar             (ar),
+        .d1r            (d1r),
         .dl             (dl),
+        .d2r            (d2r),
+        .rr             (rr),
         .eg_state_out   (new_eg_state),
         .eg_level_out   (new_eg_level),
         .eg_counter_out (new_eg_counter)
